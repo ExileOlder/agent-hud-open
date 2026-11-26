@@ -1,21 +1,23 @@
-// Package markatlas stores cropped animation cells in a lossless PNG atlas.
+// Package markatlas stores cropped animation cells in a lossless atlas.
 package markatlas
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"image"
 	"image/draw"
-	"image/png"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 const (
 	Cell       = 58
 	Columns    = 8
-	magic      = "BHA1"
+	magic      = "BHA2"
 	headerSize = 6
 	recordSize = 8
+	dimensions = 4
+	maxPixels  = 1 << 20
 )
 
 // Atlas holds just the packed pixels and a small index into the embedded file.
@@ -29,13 +31,29 @@ func Open(data []byte) (Atlas, error) {
 		return Atlas{}, errors.New("invalid mark atlas header")
 	}
 	end := headerSize + recordSize*int(binary.LittleEndian.Uint16(data[4:]))
-	if end >= len(data) {
+	if end+dimensions >= len(data) {
 		return Atlas{}, errors.New("truncated mark atlas")
 	}
-	im, err := png.Decode(bytes.NewReader(data[end:]))
+	width := int(binary.LittleEndian.Uint16(data[end:]))
+	height := int(binary.LittleEndian.Uint16(data[end+2:]))
+	if width == 0 || height == 0 || height > maxPixels/width {
+		return Atlas{}, errors.New("invalid mark atlas dimensions")
+	}
+	size := 4 * width * height
+	dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1),
+		zstd.WithDecoderMaxMemory(4*maxPixels), zstd.WithDecodeAllCapLimit(true))
 	if err != nil {
 		return Atlas{}, err
 	}
+	defer dec.Close()
+	raw, err := dec.DecodeAll(data[end+dimensions:], make([]byte, 0, size))
+	if err != nil {
+		return Atlas{}, err
+	}
+	if len(raw) != size {
+		return Atlas{}, errors.New("invalid mark atlas pixel data")
+	}
+	im := &image.NRGBA{Pix: raw, Stride: 4 * width, Rect: image.Rect(0, 0, width, height)}
 	a := Atlas{data[headerSize:end], im}
 	for i := range a.Len() {
 		r, offset := a.frame(i)

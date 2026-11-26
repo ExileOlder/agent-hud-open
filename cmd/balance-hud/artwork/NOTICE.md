@@ -15,8 +15,10 @@ renderBot (Apache-2.0). Claude Code uses separate atlases from the same recorder
 at the Agent HUD source containing `packages/hud/src/bots`. The recorder
 scales each frame to the native dock’s 58 px grid. The build trims transparent
 borders and stores identical crops once; a frame index restores their original
-positions before the native app draws them. Each provider is compressed
-and decoded separately. The two Antigravity positions share one image cache. The native app
+positions before the native app draws them. The atlas uses lossless Zstandard
+with the same decoder the app already uses to observe Deepseek. Each provider is compressed
+and decoded separately. The initial logos are stored in a separate small sheet so a resting dock
+never has to decode the hover frames. The two Antigravity positions share one image cache. The native app
 plays the hover greeting once, keeps the character awake, then eases back to
 the logo from the pose actually shown when the pointer leaves. Each idle visit uses its own 20–35 second
 wait, as in the original. After an hour without observed work or waiting

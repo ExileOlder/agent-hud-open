@@ -11,6 +11,9 @@ import (
 	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
 )
 
+//go:embed artwork/logos.atlas
+var logosData []byte
+
 //go:embed artwork/hover.atlas
 var hoverData []byte
 

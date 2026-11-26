@@ -158,3 +158,19 @@ func TestDockFrameDamageReportsOnlyChangedMarkPatches(t *testing.T) {
 		}
 	}
 }
+
+func TestRestingLogosMatchTheFirstHoverFrame(t *testing.T) {
+	for slot := range 4 {
+		sheet, actor := hoverData, slot
+		if slot == 3 {
+			sheet, actor = claudeHoverData, 0
+		}
+		bounds := image.Rect(0, 0, markRadius*2, markRadius*2)
+		want, got := image.NewRGBA(bounds), image.NewRGBA(bounds)
+		decodeAtlas(sheet, actor).Draw(want, image.Point{}, 0)
+		decodeAtlas(logosData, slot).Draw(got, image.Point{}, 0)
+		if !bytes.Equal(got.Pix, want.Pix) {
+			t.Fatalf("slot %d: the tiny logo sheet changed the resting appearance", slot)
+		}
+	}
+}

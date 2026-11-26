@@ -6,18 +6,19 @@ import (
 	"errors"
 	"image"
 	"image/color"
-	"image/png"
 	"io"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Encode removes untouched transparent borders and shares identical crops.
 // The index keeps every original frame position and the runtime blends the
-// same straight-alpha PNG channels as the original grid.
+// same straight-alpha channels as the original grid.
 func Encode(w io.Writer, grid image.Image) error {
-	return encode(w, grid, Columns*Cell)
+	return EncodeGroup(w, grid, 1)
 }
 
-func encode(w io.Writer, grid image.Image, width int) error {
+func encode(w io.Writer, grid image.Image, width int, compressor *zstd.Encoder) error {
 	bounds := grid.Bounds()
 	if bounds.Dx() != Columns*Cell || bounds.Dy()%Cell != 0 {
 		return errors.New("invalid mark atlas grid")
@@ -86,17 +87,30 @@ func encode(w io.Writer, grid image.Image, width int) error {
 	if _, err := w.Write(index); err != nil {
 		return err
 	}
-	return (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(w, im)
+	var shape [dimensions]byte
+	binary.LittleEndian.PutUint16(shape[:], uint16(im.Rect.Dx()))
+	binary.LittleEndian.PutUint16(shape[2:], uint16(im.Rect.Dy()))
+	if _, err := w.Write(shape[:]); err != nil {
+		return err
+	}
+	_, err := w.Write(compressor.EncodeAll(im.Pix, nil))
+	return err
 }
 
 // EncodeGroup encodes equal, contiguous sets of frames for each provider.
 func EncodeGroup(w io.Writer, grid image.Image, parts int) error {
-	if parts == 1 {
-		return Encode(w, grid)
-	}
 	b := grid.Bounds()
-	if parts < 2 || parts > 255 || b.Dx() != Cell*Columns || b.Dy() == 0 || b.Dy()%(parts*Cell) != 0 {
+	if parts < 1 || parts > 255 || b.Dx() != Cell*Columns || b.Dy() == 0 || b.Dy()%(parts*Cell) != 0 {
 		return errors.New("invalid atlas group grid")
+	}
+	compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBestCompression),
+		zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(1<<20))
+	if err != nil {
+		return err
+	}
+	defer compressor.Close()
+	if parts == 1 {
+		return encode(w, grid, Columns*Cell, compressor)
 	}
 	height := b.Dy() / parts
 	head := make([]byte, 5+4*(parts+1))
@@ -107,11 +121,11 @@ func EncodeGroup(w io.Writer, grid image.Image, parts int) error {
 		area := image.Rect(b.Min.X, b.Min.Y+i*height, b.Max.X, b.Min.Y+(i+1)*height)
 		var best []byte
 		var candidate bytes.Buffer
-		// Width controls how related tiles line up in PNG's scanline filter.
+		// Width controls how adjacent crops line up in the compressed bytes.
 		// Choose at build time; the runtime format is unchanged.
 		for _, width := range [...]int{Cell * 4, Cell * 6, Cell * 8} {
 			candidate.Reset()
-			if err := encode(&candidate, viewport{grid, area}, width); err != nil {
+			if err := encode(&candidate, viewport{grid, area}, width, compressor); err != nil {
 				return err
 			}
 			if best == nil || candidate.Len() < len(best) {
@@ -124,7 +138,7 @@ func EncodeGroup(w io.Writer, grid image.Image, parts int) error {
 	if _, err := w.Write(head); err != nil {
 		return err
 	}
-	_, err := body.WriteTo(w)
+	_, err = body.WriteTo(w)
 	return err
 }
 

@@ -73,19 +73,14 @@ func (c *avatarCache) trim(now time.Time) {
 	}
 }
 
-func (c *avatarCache) logo(provider, slot int) markatlas.Tile {
-	sheet, key := sheetHover, slot
-	if provider == 4 {
-		sheet, key = sheetClaudeHover, 3
+// Logo pixels ship separately so a resting dock never inflates the hover
+// sheet merely to copy its first tile.
+func (c *avatarCache) logo(slot int) markatlas.Tile {
+	if !c.hasLogo[slot] {
+		atlas := decodeAtlas(logosData, slot)
+		c.logos[slot], c.hasLogo[slot] = atlas.CopyTile(0), true
 	}
-	if !c.hasLogo[key] {
-		atlas := c.sheets[sheet][slot].atlas
-		if atlas.Len() == 0 {
-			atlas = decodeAtlas(avatarData[sheet], slot)
-		}
-		c.logos[key], c.hasLogo[key] = atlas.CopyTile(0), true
-	}
-	return c.logos[key]
+	return c.logos[slot]
 }
 
 func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame int, now time.Time) {
@@ -100,7 +95,8 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 		return
 	}
 	if frame == 0 {
-		c.logo(provider, slot).Draw(dst, origin)
+		logo := [...]int{0, 1, 1, 2, 3}[provider]
+		c.logo(logo).Draw(dst, origin)
 		return
 	}
 	sheet := sheetHover
