@@ -6,7 +6,7 @@ A quota-focused rewrite of [Agent HUD](https://github.com/jazzenchen/agent-hud-o
 
 Use Go 1.24 or later.
 
-- **Ubuntu/X11**: install the C compiler, pkg-config, libx11-dev and libxrandr-dev. Run `CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o build/balance-hud ./cmd/balance-hud`.
+- **Ubuntu/X11**: install the C compiler, pkg-config, libx11-dev, libxrandr-dev, libxext-dev and libxft-dev. Run `CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o build/balance-hud ./cmd/balance-hud`.
 - **Windows x64**: run `go build -trimpath -ldflags="-s -w -H windowsgui" -o build/balance-hud.exe ./cmd/balance-hud` on Windows, or set `GOOS=windows GOARCH=amd64 CGO_ENABLED=0` to cross-compile from Linux. This build requires native testing on Windows.
 - Run `go test ./...` to test quota decoding and display projection. Tests use fictional accounts.
 
@@ -40,7 +40,7 @@ Use a different account on the second browser authorization. If the CLI is outsi
 
 ## Use the float
 
-The four positions are Codex, Antigravity 1, Antigravity 2 and Mistral Vibe. Hover for details (Mistral shows balance, total and the remaining percentage together); drag with the primary button to dock to an edge of the primary display. Right-click to toggle numbers, middle-click to refresh, and Shift-right-click to quit. A missing reading shows `--`. If a refresh fails, the last reading for the same account is shown with a muted ring and an asterisk when numbers are enabled. The default refresh interval is five minutes. Appearance is stored in the OS user configuration directory.
+The four positions are Codex, Antigravity 1, Antigravity 2 and Mistral Vibe. Hover for details (Mistral shows balance, total and the remaining percentage together); drag with the primary button to dock to an edge of the primary display. Hover and select **Settings** to change the edge, percentages or animation without editing files. Right-click the strip to toggle numbers, middle-click to refresh, and Shift-right-click to quit. A missing reading shows `--`. If a refresh fails, the last reading for the same account is shown with a muted ring and an asterisk when numbers are enabled. The default refresh interval is five minutes. Appearance is stored in the OS user configuration directory.
 
 Use `-desktop=false` for a one-shot JSON read from a terminal build. This output includes account labels; review it before sharing. Test builds and current credentials are not part of the repository.
 
@@ -76,3 +76,5 @@ For automatic reminders, add just the indicated completion hook to each client y
   ```
 
 Other clients with a success-only hook can call `balance-hud -completed agent`. In Windows PowerShell commands use `& 'C:/path/to/BalanceHUD.exe' -completed codex -hook` (substitute the client name); in Git Bash use `'C:/path/to/BalanceHUD.exe'` without `&`. This program does not change agent configurations for you.
+
+The four marks use the original Agent HUD artwork. Rings are antialiased and hover highlights animate on demand rather than running a permanent animation loop. Use **Turn off animation** for a static HUD.

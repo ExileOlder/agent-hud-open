@@ -3,7 +3,8 @@
 package main
 
 /*
-#cgo pkg-config: x11 xrandr
+#cgo pkg-config: x11 xrandr xext xft
+#cgo LDFLAGS: -lm
 #include <stdlib.h>
 #include "x11hud.h"
 */
@@ -12,6 +13,8 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"image"
+	"math"
 	"os"
 	"runtime"
 	"time"
@@ -26,7 +29,11 @@ func runDesktop(fetch func() []result) error {
 	if p.Numbers {
 		numbers = 1
 	}
-	h := C.hud_open(C.int(p.Edge), C.double(p.Offset), numbers)
+	motion := C.int(1)
+	if p.ReduceMotion {
+		motion = 0
+	}
+	h := C.hud_open(C.int(p.Edge), C.double(p.Offset), numbers, motion)
 	if h == nil {
 		return errors.New("cannot open X11 display")
 	}
@@ -46,6 +53,15 @@ func runDesktop(fetch func() []result) error {
 	}
 	rows := view(nil)
 	set(rows)
+	var frame *image.RGBA
+	lastHover := -2
+	phase := 0.0
+	dirty := true
+	last := time.Now()
+	paint := func(hover int) {
+		frame = paintBar(rows, p, hover, phase, frame)
+		C.hud_bitmap(h, C.int(frame.Bounds().Dx()), C.int(frame.Bounds().Dy()), (*C.uchar)(unsafe.Pointer(&frame.Pix[0])))
+	}
 	ready := make(chan []result, 1)
 	inFlight := false
 	refresh := func() {
@@ -58,11 +74,16 @@ func runDesktop(fetch func() []result) error {
 	timer := time.NewTicker(5 * time.Minute)
 	defer timer.Stop()
 	for {
-		switch C.hud_step(h, 200) {
+		timeout := 200
+		if !p.ReduceMotion && lastHover >= 0 && phase < 1 {
+			timeout = 16
+		}
+		switch C.hud_step(h, C.int(timeout)) {
 		case 1:
 			return nil
 		case 2:
-			p = placement{int(C.hud_edge(h)), float64(C.hud_offset(h)), C.hud_numbers(h) != 0}
+			p = placement{Edge: int(C.hud_edge(h)), Offset: float64(C.hud_offset(h)), Numbers: C.hud_numbers(h) != 0, ReduceMotion: C.hud_motion(h) == 0}
+			dirty = true
 			if e := p.save(); e != nil {
 				fmt.Fprintln(os.Stderr, "Cannot save appearance:", e)
 			}
@@ -74,9 +95,27 @@ func runDesktop(fetch func() []result) error {
 			inFlight = false
 			rows = updateView(rows, incoming)
 			set(rows)
+			dirty = true
 		case <-timer.C:
 			refresh()
 		default:
+		}
+		now := time.Now()
+		hover := int(C.hud_hover(h))
+		if hover != lastHover {
+			phase = 0
+			dirty = true
+		} else if hover >= 0 && phase < 1 && !p.ReduceMotion {
+			phase = math.Min(1, phase+now.Sub(last).Seconds()*5)
+			dirty = true
+		}
+		if p.ReduceMotion {
+			phase = 0
+		}
+		lastHover, last = hover, now
+		if dirty {
+			paint(hover)
+			dirty = false
 		}
 	}
 }

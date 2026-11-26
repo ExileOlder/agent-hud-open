@@ -17,7 +17,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxext-dev libxft-dev
       - run: go test ./...
       - if: runner.os == 'Linux'
         run: go build -trimpath -ldflags="-s -w" -o balance-hud ./cmd/balance-hud

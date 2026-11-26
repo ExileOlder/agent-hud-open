@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"os"
 	"runtime"
@@ -96,25 +97,28 @@ func runDesktop(fetch func() []result) error {
 		busy = true
 		go func() { ready <- fetch() }()
 	}
+	var settings bool
+	var hideAt time.Time
 	hide := func() {
 		hover = -1
+		settings = false
+		hideAt = time.Time{}
 		if tip != 0 {
 			u("ShowWindow", tip, 0)
 		}
 	}
-	dimensions := func() (int32, int32, int32) {
-		step := int32(36)
-		if p.Numbers && p.Edge%2 == 0 {
-			step = 74
+	dimensions := func() (int32, int32, int32) { w, h, step := barGeometry(p); return int32(w), int32(h), int32(step) }
+	shape := func(w uintptr, width, height, r int32) {
+		region := g("CreateRoundRectRgn", 0, 0, uintptr(width+1), uintptr(height+1), uintptr(r), uintptr(r))
+		if region != 0 && u("SetWindowRgn", w, region, 1) == 0 {
+			g("DeleteObject", region)
 		}
-		if p.Edge%2 == 0 {
-			return 8 + 4*step, 44, step
-		}
-		if p.Numbers {
-			return 82, 152, step
-		}
-		return 44, 152, step
 	}
+	var barImage *image.RGBA
+	var detailsButton int32
+	hoverStart := time.Now()
+	var motionAnimating bool
+
 	invalidate := func(w uintptr) { u("InvalidateRect", w, 0, 0) }
 	place := func() {
 		if u("SystemParametersInfoW", 48, 0, uintptr(unsafe.Pointer(&area)), 0) == 0 {
@@ -134,6 +138,7 @@ func runDesktop(fetch func() []result) error {
 			x = area.Left + 3
 		}
 		frame = rect{x, y, x + w, y + h}
+		shape(bar, w, h, 84)
 		u("SetWindowPos", bar, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(bar)
 	}
@@ -142,48 +147,57 @@ func runDesktop(fetch func() []result) error {
 			hide()
 			return
 		}
+		if hover != i {
+			hoverStart = time.Now()
+			if !p.ReduceMotion {
+				motionAnimating = true
+				u("SetTimer", bar, 1, 16, 0)
+				invalidate(bar)
+			}
+		}
 		hover = i
 		lines := strings.Split(rows[i].Details, "\n")
-		w, h := int32(120), int32(len(lines)*18+14)
+		detailsButton = int32(43 + 27*(len(lines)-1))
+		w, h := int32(320), detailsButton+55
+		if settings {
+			h = 342
+		}
 		for _, s := range lines {
-			w = max(w, int32(len([]rune(s))*8+16))
+			w = max(w, int32(len([]rune(s))*9+44))
 		}
 		w = min(w, area.Right-area.Left)
 		h = min(h, area.Bottom-area.Top)
-		x, y := frame.Left, frame.Bottom+4
+		x, y := frame.Left, frame.Bottom
 		switch p.Edge {
 		case 1:
-			x, y = frame.Left-w-4, frame.Top
+			x, y = frame.Left-w, frame.Top+int32(hover)*barItem
 		case 2:
-			y = frame.Top - h - 4
+			y = frame.Top - h
 		case 3:
-			x, y = frame.Right+4, frame.Top
+			x, y = frame.Right, frame.Top+int32(hover)*barItem
 		}
 		x = bound(x, area.Left, area.Right-w)
 		y = bound(y, area.Top, area.Bottom-h)
+		shape(tip, w, h, 32)
 		u("SetWindowPos", tip, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(tip)
 	}
-	ink := []uintptr{0xbde572, 0xffb88f, 0xffb88f, 0x77b8ff}
-	bg := g("CreateSolidBrush", 0x231b15)
-	if bg == 0 {
-		return fmt.Errorf("cannot create HUD background")
+	bg := g("CreateSolidBrush", 0x16110d)
+	button := g("CreateSolidBrush", 0x32281d)
+	if bg == 0 || button == 0 {
+		return fmt.Errorf("cannot create HUD panel brushes")
 	}
 	defer g("DeleteObject", bg)
-	pens := make([]uintptr, len(ink))
-	for i, c := range ink {
-		pens[i] = g("CreatePen", 0, 1, c)
-		if pens[i] != 0 {
-			defer g("DeleteObject", pens[i])
+	defer g("DeleteObject", button)
+	options := func() []string {
+		nums, motion := "Show percentages", "Turn off animation"
+		if p.Numbers {
+			nums = "Hide percentages"
 		}
-	}
-	trackPen := g("CreatePen", 0, 1, 0x635346)
-	mutedPen := g("CreatePen", 0, 1, 0xb4a89d)
-	if trackPen != 0 {
-		defer g("DeleteObject", trackPen)
-	}
-	if mutedPen != 0 {
-		defer g("DeleteObject", mutedPen)
+		if p.ReduceMotion {
+			motion = "Turn on animation"
+		}
+		return []string{nums, motion, "Move to top edge", "Move to right edge", "Move to bottom edge", "Move to left edge", "Refresh balances", "Close settings"}
 	}
 	write := func(dc uintptr, x, y int32, s string, color uintptr) {
 		s = strings.ReplaceAll(s, "\x00", "")
@@ -215,49 +229,44 @@ func runDesktop(fetch func() []result) error {
 			return
 		}
 		if hwnd == tip {
-			if hover >= 0 {
-				for i, s := range strings.Split(rows[hover].Details, "\n") {
-					write(dc, 8, 6+int32(i*18), s, 0xf5eee7)
+			if hover < 0 {
+				return
+			}
+			barButton := func(y int32, s string) {
+				box := rect{13, y, r.Right - 13, y + 30}
+				u("FillRect", dc, uintptr(unsafe.Pointer(&box)), button)
+				write(dc, 24, y+6, s, 0xffc990)
+			}
+			if settings {
+				write(dc, 20, 15, "Balance HUD settings", 0xf5eee7)
+				write(dc, 20, 41, "Local appearance controls", 0xc8bbae)
+				for i, label := range options() {
+					barButton(72+int32(i)*32, label)
 				}
+			} else {
+				for i, s := range strings.Split(rows[hover].Details, "\n") {
+					write(dc, 20, 13+int32(i*27), s, 0xf5eee7)
+				}
+				barButton(detailsButton, "Settings  ›")
 			}
 			return
 		}
-		_, _, step := dimensions()
-		old := g("SelectObject", dc, g("GetStockObject", 5))
-		defer g("SelectObject", dc, old)
-		for i, r := range rows {
-			x, y := int32(4)+int32(i)*step, int32(4)
-			if p.Edge%2 != 0 {
-				x, y = 4, 4+int32(i)*36
-			}
-			if trackPen != 0 {
-				oldPen := g("SelectObject", dc, trackPen)
-				g("Ellipse", dc, uintptr(x+4), uintptr(y+4), uintptr(x+32), uintptr(y+32))
-				g("SelectObject", dc, oldPen)
-			}
-			pen, color := pens[i], ink[i]
-			if r.Stale {
-				pen, color = mutedPen, 0xb4a89d
-			}
-			if pen != 0 && r.Percent > 0 {
-				oldPen := g("SelectObject", dc, pen)
-				if r.Percent >= 100 {
-					g("Ellipse", dc, uintptr(x+4), uintptr(y+4), uintptr(x+32), uintptr(y+32))
-				} else {
-					theta := float64(r.Percent) * 2 * math.Pi / 100
-					endX := x + 18 + int32(math.Round(14*math.Sin(theta)))
-					endY := y + 18 - int32(math.Round(14*math.Cos(theta)))
-					g("SetArcDirection", dc, 2)
-					g("Arc", dc, uintptr(x+4), uintptr(y+4), uintptr(x+32), uintptr(y+32),
-						uintptr(x+18), uintptr(y+4), uintptr(endX), uintptr(endY))
-				}
-				g("SelectObject", dc, oldPen)
-			}
-			write(dc, x+18-int32(len(r.Mark)*4), y+10, r.Mark, color)
-			if p.Numbers {
-				write(dc, x+38, y+10, r.Number, 0xf5eee7)
-			}
+		phase := 0.0
+		if hover >= 0 && !p.ReduceMotion {
+			phase = clamp01(time.Since(hoverStart).Seconds() * 5)
 		}
+		barImage = paintBar(rows, p, hover, phase, barImage)
+		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
+		info := struct {
+			Size                   uint32
+			Width, Height          int32
+			Planes, Bits           uint16
+			Compression, ImageSize uint32
+			X, Y                   int32
+			Colors, Important      uint32
+		}{Size: 40, Width: int32(w), Height: -int32(h), Planes: 1, Bits: 32}
+		g("StretchDIBits", dc, 0, 0, uintptr(w), uintptr(h), 0, 0, uintptr(w), uintptr(h),
+			uintptr(unsafe.Pointer(&barImage.Pix[0])), uintptr(unsafe.Pointer(&info)), 0, 0x00cc0020)
 	}
 	save := func() {
 		if e := p.save(); e != nil {
@@ -275,7 +284,7 @@ func runDesktop(fetch func() []result) error {
 			return
 		}
 		i := int((v - 4) / step)
-		if i != hover {
+		if i != hover && !settings {
 			details(i)
 		}
 	}
@@ -310,6 +319,56 @@ func runDesktop(fetch func() []result) error {
 		invalidate(notice)
 	}
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
+		if hwnd == tip && tip != 0 {
+			switch msg {
+			case 0x200:
+				hideAt = time.Time{}
+				event := track{Flags: 2, Window: tip}
+				event.Size = uint32(unsafe.Sizeof(event))
+				u("TrackMouseEvent", uintptr(unsafe.Pointer(&event)))
+			case 0x2a3:
+				if !settings {
+					hideAt = time.Now().Add(180 * time.Millisecond)
+				}
+			case 0x205:
+				hide()
+				invalidate(bar)
+				return 0
+			case 0x202:
+				y := mouse(lp).Y
+				if !settings && y >= detailsButton && y < detailsButton+38 {
+					settings = true
+					details(hover)
+					return 0
+				}
+				if settings && y >= 72 && y < 72+8*32 {
+					selection := (y - 72) / 32
+					switch selection {
+					case 0:
+						p.Numbers = !p.Numbers
+						place()
+						details(hover)
+					case 1:
+						p.ReduceMotion = !p.ReduceMotion
+						invalidate(bar)
+						details(hover)
+					case 6:
+						refresh()
+						return 0
+					case 7:
+						hide()
+						invalidate(bar)
+						return 0
+					default:
+						p.Edge = int(selection - 2)
+						hide()
+						place()
+					}
+					save()
+					return 0
+				}
+			}
+		}
 		if msg == 0xf {
 			render(hwnd)
 			return 0
@@ -331,6 +390,17 @@ func runDesktop(fetch func() []result) error {
 				}
 				return 0
 			case 0x113: // WM_TIMER
+				if !hideAt.IsZero() && time.Now().After(hideAt) {
+					hide()
+					invalidate(bar)
+				}
+				if motionAnimating {
+					invalidate(bar)
+					if hover < 0 || p.ReduceMotion || time.Since(hoverStart) > 200*time.Millisecond {
+						motionAnimating = false
+						u("SetTimer", bar, 1, 200, 0)
+					}
+				}
 				if noticeID != 0 && time.Now().After(noticeUntil) {
 					noticeID = 0
 					u("ShowWindow", notice, 0)
@@ -369,6 +439,7 @@ func runDesktop(fetch func() []result) error {
 				return 0
 			case 0x200: // WM_MOUSEMOVE
 				m := mouse(lp)
+				hideAt = time.Time{}
 				if pressing {
 					var cur point
 					if u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 && math.Abs(float64(cur.X-initial.X))+math.Abs(float64(cur.Y-initial.Y)) >= 6 {
@@ -382,7 +453,9 @@ func runDesktop(fetch func() []result) error {
 				}
 				return 0
 			case 0x2a3:
-				hide()
+				if !settings {
+					hideAt = time.Now().Add(180 * time.Millisecond)
+				}
 				return 0
 			case 0x201:
 				hide()

@@ -11,6 +11,7 @@ import (
 )
 
 type row struct {
+	Segments              []int
 	Mark, Number, Details string
 	Identity              string
 	Percent               int // -1 is unknown
@@ -42,6 +43,7 @@ func updateView(previous []row, results []result) []row {
 			continue
 		}
 		n.Identity, n.Percent, n.Number, n.Stale = old.Identity, old.Percent, fmt.Sprintf("%d%%*", old.Percent), true
+		n.Segments = old.Segments
 		detail := old.Details
 		if k := strings.Index(detail, "\nLast reading —"); k >= 0 {
 			detail = detail[:k]
@@ -91,6 +93,9 @@ func view(results []result) []row {
 			}
 			low := 101.0
 			for _, w := range a.Windows {
+				if r.Provider == "antigravity" && len(dst.Segments) < 4 {
+					dst.Segments = append(dst.Segments, int(math.Round(w.Remaining)))
+				}
 				if w.Remaining < low {
 					low = w.Remaining
 				}
@@ -115,9 +120,10 @@ func view(results []result) []row {
 }
 
 type placement struct {
-	Edge    int
-	Offset  float64
-	Numbers bool
+	Edge         int
+	Offset       float64
+	Numbers      bool
+	ReduceMotion bool
 }
 
 func settingsPath() string {
