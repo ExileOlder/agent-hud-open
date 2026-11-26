@@ -15,6 +15,7 @@ import (
 // Pending requests are reported once, without reading the request content.
 type DeepSeekStatus struct {
 	Running         bool
+	Compacting      bool
 	Pending         bool // at least one question remains open
 	ApprovalPending bool
 	Questions       []string
@@ -82,10 +83,10 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 			turnSeq, scannedSeq        int
 			openTurn                   *int
 			approvalDisabled           bool
-			approvals                  deepSeekApprovals
+			log                        deepSeekLifecycle
 		}
 		cache := map[string]cacheEntry{}
-		running, pending, approving := false, false, false
+		running, pending, approving, compacting := false, false, false, false
 		started := time.Now()
 		for {
 			now := time.Now()
@@ -135,27 +136,30 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 							}
 						}
 					}
+					turn := noDeepSeekTurn
 					if c.running && !c.approvalDisabled {
-						for _, id := range c.approvals.watch(home, session, *c.openTurn) {
+						turn = *c.openTurn
+					}
+					if c.running || c.log.compacting(now) || now.Sub(c.modified) < deepSeekCompactLifetime {
+						for _, id := range c.log.watch(home, session, turn) {
 							state.Approvals = append(state.Approvals, session+"/"+id)
 						}
-					} else {
-						c.approvals = deepSeekApprovals{}
 					}
 					retain[f.Name()] = c
-					waitingApproval := len(c.approvals.pending) > 0
+					waitingApproval := len(c.log.pending) > 0
+					state.Compacting = state.Compacting || c.log.compacting(now)
 					state.ApprovalPending = state.ApprovalPending || waitingApproval
-					state.Running = state.Running || (c.running && !c.approvals.closed && c.questionCount == 0 && !waitingApproval)
+					state.Running = state.Running || (c.running && !c.log.closed && c.questionCount == 0 && !waitingApproval)
 					state.Pending = state.Pending || c.questionCount > 0
 				}
 				cache = retain
-				if state.Running != running || state.Pending != pending || state.ApprovalPending != approving || len(state.Questions) > 0 || len(state.Approvals) > 0 || state.Completed > 0 {
+				if state.Running != running || state.Compacting != compacting || state.Pending != pending || state.ApprovalPending != approving || len(state.Questions) > 0 || len(state.Approvals) > 0 || state.Completed > 0 {
 					select {
 					case out <- state:
 					case <-ctx.Done():
 						return
 					}
-					running, pending, approving = state.Running, state.Pending, state.ApprovalPending
+					running, pending, approving, compacting = state.Running, state.Pending, state.ApprovalPending, state.Compacting
 				}
 			}
 			select {

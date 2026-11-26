@@ -162,3 +162,21 @@ func TestClaudeCompactionIsImmediateAndReturnsToThePreviousWork(t *testing.T) {
 		t.Fatalf("ending manual compaction left work running or fabricated a message: %d", got)
 	}
 }
+
+func TestDeepSeekUsesOwnCompactionPoseWithoutACompletionNotice(t *testing.T) {
+	var w workingMarks
+	var m mailInbox
+	now := time.Now()
+	p := placement{}
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Compacting: true}, &m, now, true)
+	f, active := w.frames(view(nil), now, now, now, -1, p)
+	if !active || f[3] != compactBase || f[0] != 0 || len(m.queue) != 0 {
+		t.Fatalf("bad standalone compaction: %v, notices=%v", f, m.queue)
+	}
+	later := now.Add(time.Second)
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{}, &m, later, true)
+	f, _ = w.frames(view(nil), later, now, now, -1, p)
+	if f[3] >= workBase || len(m.queue) != 0 {
+		t.Fatalf("compaction end faked work or a completion: %v, notices=%v", f, m.queue)
+	}
+}

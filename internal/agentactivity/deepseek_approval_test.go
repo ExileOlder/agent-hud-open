@@ -33,7 +33,7 @@ func TestDeepSeekPendingApprovalFollowsFlushedFrameBoundaries(t *testing.T) {
 	frame := func(lines ...string) []byte {
 		return enc.EncodeAll([]byte(strings.Join(lines, "\n")+"\n"), nil)
 	}
-	a := deepSeekApprovals{path: path}
+	a := deepSeekLifecycle{path: path}
 	check := func(turn, new, pending int) {
 		t.Helper()
 		if got := len(a.watch("", "", turn)); got != new || len(a.pending) != pending {

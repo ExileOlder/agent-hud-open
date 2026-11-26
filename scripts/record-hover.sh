@@ -26,7 +26,7 @@ for mode in "$@"; do
   providers=3
   case "$mode" in
     hover) :;;
-    compact) query="?compact"; providers=2;;
+    compact) query="?compact"; providers=3;;
     tool) query="?tool=tool-read"; providers=4;;
     cue-question|cue-permission|cue-done) query="?cue=${mode#cue-}"; providers=4;;
     idle) query="?idle";;

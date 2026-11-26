@@ -129,8 +129,8 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 			slot = 3
 		}
 	}
-	if sheet == sheetCompact && provider == 4 {
-		slot = 1
+	if sheet == sheetCompact {
+		slot = [...]int{0, 0, 0, 1, 2}[provider]
 	}
 	c.load(sheet, slot, now).Draw(dst, origin, frame)
 }

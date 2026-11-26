@@ -26,7 +26,7 @@ and ellipsis period; subsequent cycles skip the entrance. A tool cycle keeps the
 1.5-second rest. The native sprite renderer uses the upstream 300 ms
 ease-out for working-look changes and interpolates only the character pixels;
 the quota ring and text stay fixed. The compaction frames use the original
-`compacting` look for Codex and Claude Code's procedural mark.
+`compacting` look for Codex, Deepseek and Claude Code's procedural mark.
 The compact peek is a native adaptation of the Simple dock's AgentPeek layout.
 
 The `tool.atlas` atlas samples the same Apache-2.0 procedural renderer used above.

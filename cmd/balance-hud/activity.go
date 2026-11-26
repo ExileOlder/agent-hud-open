@@ -39,15 +39,15 @@ func antigravityProfileKeys() map[string]uint32 {
 }
 
 type workingMarks struct {
-	rest                    [5]markRest
-	looks                   [5]workLook
-	codex                   workClock
-	deepSeek                time.Time
-	agy                     map[string]workClock
-	agyWaits                map[agentactivity.AntigravityWait]markCue
-	hooks                   [2]map[uint32]workClock
-	pendingHooks            [2]map[uint32]markCue
-	codexWait, deepSeekWait markCue
+	rest                      [5]markRest
+	looks                     [5]workLook
+	codex                     workClock
+	deepSeek, deepSeekCompact time.Time
+	agy                       map[string]workClock
+	agyWaits                  map[agentactivity.AntigravityWait]markCue
+	hooks                     [2]map[uint32]workClock
+	pendingHooks              [2]map[uint32]markCue
+	codexWait, deepSeekWait   markCue
 }
 
 func setProjectionWaiting(m *markCue, active bool, now time.Time, inbox *mailInbox, slot int) {
@@ -100,6 +100,11 @@ func (w *workingMarks) updateDeepSeek(state agentactivity.DeepSeekStatus, mail *
 		}
 	default:
 		setProjectionWaiting(&w.deepSeekWait, false, now, mail, 3)
+	}
+	if !state.Compacting {
+		w.deepSeekCompact = time.Time{}
+	} else if w.deepSeekCompact.IsZero() {
+		w.deepSeekCompact = now
 	}
 	if state.Running {
 		if w.deepSeek.IsZero() {
@@ -276,7 +281,7 @@ func hookAge(now time.Time, work map[uint32]workClock) time.Duration {
 func (w *workingMarks) ages(rows []row, now time.Time) [5]time.Duration {
 	return [5]time.Duration{workAge(now, w.codex.started),
 		workAge(now, w.agy[strings.ToLower(rows[1].Identity)].started),
-		workAge(now, w.agy[strings.ToLower(rows[2].Identity)].started), max(workAge(now, w.deepSeek), hookAge(now, w.hooks[0])), hookAge(now, w.hooks[1])}
+		workAge(now, w.agy[strings.ToLower(rows[2].Identity)].started), max(workAge(now, w.deepSeek), workAge(now, w.deepSeekCompact), hookAge(now, w.hooks[0])), hookAge(now, w.hooks[1])}
 }
 
 func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hover int, p placement) (markFrames, bool) {
@@ -307,6 +312,9 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 				tool[i+3] = clock
 			}
 		}
+	}
+	if !w.deepSeekCompact.IsZero() {
+		tool[3].compactingAt = w.deepSeekCompact
 	}
 	active := false
 	for slot := range p.slotCount() {

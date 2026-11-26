@@ -21,7 +21,7 @@ func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 		{"Claude idle", sheetClaudeIdle, 1, idleFrames},
 		{"Claude work", sheetClaudeWork, 1, workFrames},
 		{"tools", sheetTool, 4, toolFrames},
-		{"compaction", sheetCompact, 2, compactFrames},
+		{"compaction", sheetCompact, 3, compactFrames},
 		{"question", sheetQuestion, 4, waitAtlasFrames},
 		{"permission", sheetPermission, 4, waitAtlasFrames},
 		{"completion", sheetDone, 4, cueFrames},

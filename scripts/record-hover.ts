@@ -20,7 +20,7 @@ const work = query.has("work");
 const workFPS = 6, workCount = 104; // contiguous entrance + first steady cycle; final tile is held thinking
 const toolFPS = 8, toolCount = 40; // 4.5s: 3s of beats, 1.5s of rest
 const doneCount = 40;
-const keys = compacting ? ["openai", "claude"] : compact || asleep ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
+const keys = compacting ? ["openai", "deepseek", "claude"] : compact || asleep ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
 const wait = cue === "question" || cue === "permission";
 const frames = compacting ? 32 : wait ? 40 : cue ? doneCount : tool ? toolCount : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
@@ -30,7 +30,7 @@ const ctx = sheet.getContext("2d")!;
 
 async function record() {
   for (const [slot, key] of keys.entries()) {
-    const image = marks[key === "claude" ? 3 : slot];
+    const image = marks[["openai", "antigravity", "deepseek", "claude"].indexOf(key)];
     if (!image.naturalWidth) throw new Error("Unreadable asset for " + key);
     const source = document.createElement("canvas");
     source.width = source.height = 256;
