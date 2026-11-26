@@ -101,7 +101,10 @@ func barGeometry(p placement) (w, h, step int) {
 	return w, 2*barPadding + p.slotCount()*barItem, step
 }
 
-type paintedMark struct{ percent, tone, frame int }
+type paintedMark struct {
+	percent, tone int
+	visual        markVisual
+}
 
 type barPainter struct {
 	bitmap   *image.RGBA
@@ -118,6 +121,10 @@ var dockBGRA = image.NewUniform(color.RGBA{9, 7, 5, 255})
 // Both native windows consume the same BGRX bitmap. Repaint the mark that
 // changed in place; the surrounding background and other marks are unchanged.
 func (b *barPainter) paint(rows []row, p placement, frames markFrames) *image.RGBA {
+	return b.paintVisuals(rows, p, plainVisuals(frames))
+}
+
+func (b *barPainter) paintVisuals(rows []row, p placement, frames visualFrames) *image.RGBA {
 	w, h, step := barGeometry(p)
 	geometry := [3]int{w, h, step}
 	vertical := p.Edge%2 != 0
@@ -170,7 +177,12 @@ func (b *barPainter) paint(rows []row, p placement, frames markFrames) *image.RG
 				dst.SetRGBA(xx, yy, px)
 			}
 		}
-		b.avatars.draw(dst, image.Pt(cx-markRadius, cy-markRadius), i, frames[i], now)
+		origin := image.Pt(cx-markRadius, cy-markRadius)
+		if visual := mark.visual; visual.oldOpacity != 0 {
+			b.avatars.drawMix(dst, origin, i, visual.previous, visual.frame, 255-int(visual.oldOpacity), 255, now)
+		} else {
+			b.avatars.draw(dst, origin, i, mark.visual.frame, now)
+		}
 		for y := patch.Min.Y; y < patch.Max.Y; y++ {
 			start := dst.PixOffset(patch.Min.X, y)
 			pixels := dst.Pix[start : start+4*patch.Dx()]

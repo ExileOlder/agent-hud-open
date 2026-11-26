@@ -41,11 +41,11 @@ type cachedSheet struct {
 // Owned by the native paint loop; the rest logos never keep a whole
 // animation decoded. No timer or goroutine is attached to an atlas.
 type avatarCache struct {
-	sheets     [sheetCount][4]cachedSheet
-	logos      [4]markatlas.Tile
-	hasLogo    [4]bool
-	nextSweep  time.Time
-	exitPixels [2]*image.RGBA
+	sheets    [sheetCount][4]cachedSheet
+	logos     [4]markatlas.Tile
+	hasLogo   [4]bool
+	nextSweep time.Time
+	mixPixels [2]*image.RGBA
 }
 
 func (c *avatarCache) load(sheet avatarSheet, slot int, now time.Time) markatlas.Atlas {
@@ -94,7 +94,7 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 		if step := index % exitSteps; step == 0 {
 			c.draw(dst, origin, provider, index/exitSteps, now)
 		} else {
-			c.drawExit(dst, origin, provider, index/exitSteps, step, now)
+			c.drawMix(dst, origin, provider, index/exitSteps, 0, step, exitSteps, now)
 		}
 		return
 	}
@@ -129,19 +129,23 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 	c.load(sheet, slot, now).Draw(dst, origin, frame)
 }
 
-// Keep the crop and its alpha premultiplied while the actor becomes its logo.
-// Only the active hover exit needs these two reusable mark-sized surfaces.
-func (c *avatarCache) drawExit(dst *image.RGBA, origin image.Point, provider, from, step int, now time.Time) {
-	for i, frame := range [2]int{0, from} {
-		if c.exitPixels[i] == nil {
-			c.exitPixels[i] = image.NewRGBA(image.Rect(0, 0, markatlas.Cell, markatlas.Cell))
+// Mix premultiplied pixels in two reusable mark-sized surfaces. Neither the
+// percentage text, quota ring nor the neighboring marks is faded.
+func (c *avatarCache) drawMix(dst *image.RGBA, origin image.Point, provider, from, to, step, steps int, now time.Time) {
+	if step == 0 {
+		c.draw(dst, origin, provider, from, now)
+		return
+	}
+	for i, frame := range [2]int{to, from} {
+		if c.mixPixels[i] == nil {
+			c.mixPixels[i] = image.NewRGBA(image.Rect(0, 0, markatlas.Cell, markatlas.Cell))
 		}
-		clear(c.exitPixels[i].Pix)
-		c.draw(c.exitPixels[i], image.Point{}, provider, frame, now)
+		clear(c.mixPixels[i].Pix)
+		c.draw(c.mixPixels[i], image.Point{}, provider, frame, now)
 	}
-	logo, actor := c.exitPixels[0], c.exitPixels[1]
-	for i, v := range actor.Pix {
-		actor.Pix[i] = uint8((int(v)*(exitSteps-step) + int(logo.Pix[i])*step + exitSteps/2) / exitSteps)
+	front, back := c.mixPixels[0], c.mixPixels[1]
+	for i, v := range back.Pix {
+		back.Pix[i] = uint8((int(v)*(steps-step) + int(front.Pix[i])*step + steps/2) / steps)
 	}
-	draw.Draw(dst, actor.Bounds().Add(origin), actor, image.Point{}, draw.Over)
+	draw.Draw(dst, back.Bounds().Add(origin), back, image.Point{}, draw.Over)
 }

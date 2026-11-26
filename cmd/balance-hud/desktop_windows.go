@@ -178,7 +178,8 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	started := time.Now()
 	hoverStart := started
 	var motionAnimating bool
-	var previousFrames markFrames
+	var previousFrames visualFrames
+	var looks lookTransition
 
 	invalidate := func(w uintptr) { u("InvalidateRect", w, 0, 0) }
 	place := func() {
@@ -469,10 +470,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 			paintGear(dc, r.Right-gear/2-3, r.Bottom/2, bg)
 			return
 		}
-		now := time.Now()
-		frames, active := work.frames(rows, now, started, hoverStart, hover, p)
-		frames, _ = mail.cueFrames(now, p, rows, frames, active)
-		barImage := painter.paint(rows, p, frames)
+		barImage := painter.paintVisuals(rows, p, previousFrames)
 		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
 		info := struct {
 			Size                   uint32
@@ -695,8 +693,9 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 				painter.avatars.trim(now)
 				frames, active := work.frames(rows, now, started, hoverStart, hover, p)
 				frames, active = mail.cueFrames(now, p, rows, frames, active)
-				if previousFrames != frames {
-					previousFrames = frames
+				visual, blending := looks.visual(now, frames, p.ReduceMotion)
+				if previousFrames != visual {
+					previousFrames = visual
 					invalidate(bar)
 				}
 				select {
@@ -730,7 +729,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 					}
 				default:
 				}
-				active = active || pressing || len(mail.queue) > 0
+				active = active || blending || pressing || len(mail.queue) > 0
 				if motionAnimating != active {
 					motionAnimating = active
 					interval := uintptr(200)

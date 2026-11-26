@@ -95,11 +95,12 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	started := time.Now()
 	hoverStart := started
 	lastHover := -1
-	var previousFrames markFrames
+	var previousFrames visualFrames
+	var looks lookTransition
 	animating, dirty := false, true
 	var regions [5 * 4]C.int
-	paint := func(frames markFrames, full bool) {
-		frame := painter.paint(rows, p, frames)
+	paint := func(frames visualFrames, full bool) {
+		frame := painter.paintVisuals(rows, p, frames)
 		n := 0
 		if !full {
 			for _, r := range painter.damage {
@@ -314,10 +315,11 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		}
 		frames, active := work.frames(rows, now, started, hoverStart, hover, p)
 		frames, active = mail.cueFrames(now, p, rows, frames, active)
-		animating = active
-		if dirty || frames != previousFrames {
-			paint(frames, dirty)
-			previousFrames, dirty = frames, false
+		visual, blending := looks.visual(now, frames, p.ReduceMotion)
+		animating = active || blending
+		if dirty || visual != previousFrames {
+			paint(visual, dirty)
+			previousFrames, dirty = visual, false
 		}
 	}
 }
