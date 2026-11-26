@@ -54,7 +54,7 @@ func TestCompactPeekMatchesOriginalOrder(t *testing.T) {
 		t.Fatalf("got %+v", items)
 	}
 	mistral := accountPeek("mistral", quota.Account{Balance: "137.14 / 150.00 USD", Windows: []quota.Window{{Remaining: 91.426666}}})
-	if len(mistral) != 1 || mistral[0] != (peekItem{"Mistral", "$137.14 / $150.00 (91.43%)", 1}) {
+	if len(mistral) != 1 || mistral[0] != (peekItem{"Deepseek", "$137.14 / $150.00 (91.43%)", 1}) {
 		t.Fatalf("got %+v", mistral)
 	}
 }

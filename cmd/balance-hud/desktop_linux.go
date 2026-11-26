@@ -113,7 +113,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		bar := mailRect{int(n[0]), int(n[1]), int(n[2]), int(n[3])}
 		screen := mailRect{int(n[4]), int(n[5]), int(n[6]), int(n[7])}
 		tail := inboxTail(bar, screen, p.Edge)
-		box := inboxPanel(tail, bar, screen, p.Edge, len(mail.items))
+		mail.fitRows(screen.h)
+		box := inboxPanel(tail, bar, screen, p.Edge, len(mail.visible()))
 		hidden := C.hud_drag_active(h) != 0
 		if revision != mail.revision {
 			for i, item := range mail.visible() {
@@ -131,7 +132,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		if hidden {
 			count, opened = 0, 0
 		}
-		C.hud_mail_sync(h, C.int(count), opened, C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h))
+		C.hud_mail_sync(h, C.int(count), opened, C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h), C.int(len(mail.visible())))
 		if len(mail.queue) > 0 && !hidden {
 			source := mail.sourceSlot(mail.queue[0], rows)
 			if source < 0 || source >= p.slotCount() {

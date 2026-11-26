@@ -56,7 +56,7 @@ func (s *panelSettings) items(p placement, rows []row) []settingsItem {
 		{"Antigravity · first position", identity(1)},
 		{"Antigravity · second position", identity(2)},
 		{"Antigravity · authorize another account", "Authorize in browser"},
-		{"Mistral Vibe · connect subscription", status(3)},
+		{deepSeekDisplayName + " · connect subscription", status(3)},
 		{"Claude Code · show in HUD", onOff(p.ShowClaude)},
 		{"Claude Code · sign in", claudeStatus},
 	}

@@ -63,7 +63,7 @@ func view(results []result) []row {
 		{Mark: "C", Number: "--", Details: "Codex: waiting for quota", Percent: -1},
 		{Mark: "A1", Number: "--", Details: "Antigravity account 1: waiting for quota", Percent: -1},
 		{Mark: "A2", Number: "--", Details: "Antigravity account 2: waiting for quota", Percent: -1},
-		{Mark: "M", Number: "--", Details: "Mistral Vibe: waiting for quota", Percent: -1},
+		{Mark: "D", Number: "--", Details: deepSeekDisplayName + ": waiting for quota", Percent: -1},
 		{Mark: "Cl", Number: "--", Details: "Claude Code: waiting for quota", Percent: -1},
 	}
 	for _, r := range results {
@@ -92,7 +92,11 @@ func view(results []result) []row {
 			a := r.Accounts[j]
 			dst.Identity = a.Label
 			dst.Peek = accountPeek(r.Provider, a)
-			lines := []string{a.Label}
+			displayLabel := a.Label
+			if r.Provider == "mistral" {
+				displayLabel = deepSeekDisplayName
+			}
+			lines := []string{displayLabel}
 			if a.Balance != "" {
 				balance := a.Balance
 				if r.Provider == "mistral" && len(a.Windows) > 0 {

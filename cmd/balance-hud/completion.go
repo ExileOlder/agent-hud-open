@@ -15,8 +15,9 @@ import (
 )
 
 const deepSeekAgent = 6
+const deepSeekDisplayName = "Deepseek"
 
-var agentNames = []string{"", "Codex", "Antigravity", "Mistral Vibe", "Agent", "Claude Code", "DeepSeek Harness"}
+var agentNames = []string{"", "Codex", "Antigravity", deepSeekDisplayName, "Agent", "Claude Code", deepSeekDisplayName}
 
 func completionID(name string) int {
 	switch strings.ToLower(name) {

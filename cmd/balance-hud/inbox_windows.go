@@ -46,7 +46,7 @@ func drawMailStroke(dc, rgb, width uintptr, lines ...[4]int32) {
 	g("SelectObject", dc, old)
 	g("DeleteObject", pen)
 }
-func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int32, string, uintptr), labelFont, headFont, bgBrush uintptr, measure func(uintptr, string) int32) {
+func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int32, string, uintptr), labelFont, mailSmall, mailTitle, bgBrush uintptr, measure func(uintptr, string) int32) {
 	switch hwnd {
 	case m.badge:
 		g("SelectObject", dc, labelFont)
@@ -77,19 +77,19 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 		width, height := int32(m.lastPanel.w), int32(m.lastPanel.h)
 		const base, rowBG, hotBG, button, rule = 0x101418, 0x191f25, 0x222c36, 0x2c3947, 0x26313b
 		fillMailCard(dc, 0, 0, width, height, 22, base)
-		g("SelectObject", dc, headFont)
-		write(dc, 21, 12, "消息", 0xf6f4f2)
-		g("SelectObject", dc, labelFont)
+		g("SelectObject", dc, mailTitle)
+		write(dc, 27, 10, "消息", 0xf6f4f2)
+		g("SelectObject", dc, mailSmall)
 		total := strconv.Itoa(len(m.items))
-		fillMailCard(dc, 69, 14, 30, 24, 8, button)
-		write(dc, 84-measure(dc, total)/2, 17, total, 0xf6f4f2)
+		fillMailCard(dc, 121, 17, 55, 40, 11, button)
+		write(dc, 148-measure(dc, total)/2, 18, total, 0xf6f4f2)
 		clearBG := uintptr(rowBG)
 		if m.hot == 92 {
 			clearBG = hotBG
 		}
-		fillMailCard(dc, width-112, 11, 98, 31, 8, clearBG)
-		write(dc, width-63-measure(dc, "全部清空")/2, 17, "全部清空", 0xf6f4f2)
-		drawMailStroke(dc, rule, 1, [4]int32{17, 47, width - 18, 47})
+		fillMailCard(dc, width-198, 14, 176, 45, 11, clearBG)
+		write(dc, width-110-measure(dc, "全部清空")/2, 18, "全部清空", 0xf6f4f2)
+		drawMailStroke(dc, rule, 1, [4]int32{22, 66, width - 23, 66})
 		tiles := [3]uintptr{0x15362e, 0x1b314a, 0x3b2c24}
 		accents := [3]uintptr{0x72dcb1, 0x92baff, 0xf0be85}
 		for i, item := range m.visible() {
@@ -98,28 +98,28 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 			if m.hot == mailOpenBase+i || m.hot == mailDismissBase+i {
 				color = hotBG
 			}
-			fillMailCard(dc, 12, y, width-24, mailRow-5, 11, color)
+			fillMailCard(dc, 16, y, width-32, mailRow-8, 15, color)
 			tone := item.tone()
-			fillMailCard(dc, 24, y+14, 32, 32, 9, tiles[tone])
+			fillMailCard(dc, 30, y+20, 52, 52, 13, tiles[tone])
 			switch tone {
 			case 0:
-				drawMailStroke(dc, accents[tone], 2, [4]int32{34, y + 30, 39, y + 35}, [4]int32{39, y + 35, 47, y + 25})
+				drawMailStroke(dc, accents[tone], 3, [4]int32{46, y + 47, 53, y + 54}, [4]int32{53, y + 54, 67, y + 37})
 			case 1:
-				write(dc, 40-measure(dc, "?")/2, y+20, "?", mailRGB(accents[tone]))
+				write(dc, 56-measure(dc, "?")/2, y+28, "?", mailRGB(accents[tone]))
 			case 2:
-				drawMailStroke(dc, accents[tone], 2, [4]int32{40, y + 23, 40, y + 32}, [4]int32{40, y + 35, 40, y + 37})
+				drawMailStroke(dc, accents[tone], 3, [4]int32{56, y + 34, 56, y + 48}, [4]int32{56, y + 53, 56, y + 56})
 			}
-			g("SelectObject", dc, headFont)
-			write(dc, 69, y+7, agentNames[item.agent], 0xf6f4f2)
-			g("SelectObject", dc, labelFont)
-			write(dc, 69, y+31, item.summary(), mailRGB(accents[tone]))
-			x, cy := width-40, y+29
+			g("SelectObject", dc, mailTitle)
+			write(dc, 106, y+3, agentNames[item.agent], 0xf6f4f2)
+			g("SelectObject", dc, mailSmall)
+			write(dc, 106, y+46, item.summary(), mailRGB(accents[tone]))
+			x, cy := width-58, y+48
 			closeInk := uintptr(0x74787b)
 			if m.hot == mailDismissBase+i {
-				fillMailCard(dc, width-60, y+12, 40, 34, 9, button)
+				fillMailCard(dc, width-88, y+20, 59, 58, 12, button)
 				closeInk = 0xe7eef5
 			}
-			drawMailStroke(dc, closeInk, 2, [4]int32{x - 4, cy - 4, x + 5, cy + 5}, [4]int32{x - 4, cy + 4, x + 5, cy - 5})
+			drawMailStroke(dc, closeInk, 3, [4]int32{x - 7, cy - 7, x + 8, cy + 8}, [4]int32{x - 7, cy + 7, x + 8, cy - 8})
 		}
 	case m.paper:
 		pen := g("CreatePen", 0, 1, 0xffaa7e)
@@ -164,7 +164,8 @@ func (m *winMail) draw(now time.Time, frame, area rect, p placement, rows []row,
 	}
 	show := count > 0 && m.open
 	if show {
-		box := inboxPanel(tail, bar, screen, p.Edge, count)
+		m.fitRows(screen.h)
+		box := inboxPanel(tail, bar, screen, p.Edge, len(m.visible()))
 		if box != m.lastPanel || !m.panelVisible {
 			shape(m.panel, int32(box.w), int32(box.h), 44)
 			showMailWindow(m.panel, box)

@@ -51,7 +51,7 @@ func accountPeek(provider string, a quota.Account) []peekItem {
 			b = "$" + amount + " / $" + total
 		}
 		remaining := a.Windows[0].Remaining
-		return []peekItem{{"Mistral", fmt.Sprintf("%s (%.2f%%)", b, remaining), quotaTone(remaining)}}
+		return []peekItem{{deepSeekDisplayName, fmt.Sprintf("%s (%.2f%%)", b, remaining), quotaTone(remaining)}}
 	}
 	items := []peekItem{}
 	if provider == "antigravity" {
@@ -83,7 +83,7 @@ func (r row) peekLine(slot int) []peekItem {
 		return []peekItem{{"Claude Code", "--", 0}}
 	}
 	if slot == 3 {
-		return []peekItem{{"Mistral", "--", 0}}
+		return []peekItem{{deepSeekDisplayName, "--", 0}}
 	}
 	return []peekItem{{"Quota", "--", 0}}
 }

@@ -170,6 +170,9 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	defer g("DeleteObject", valueFont)
 	figureFont := font(400, 16)
 	defer g("DeleteObject", figureFont)
+	mailSmall, mailTitle := font(400, 30), font(600, 40)
+	defer g("DeleteObject", mailSmall)
+	defer g("DeleteObject", mailTitle)
 	prefsFont := font(400, 15)
 	defer g("DeleteObject", prefsFont)
 	started := time.Now()
@@ -370,7 +373,9 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			u("SetWindowPos", bar, ^uintptr(0), 0, 0, 0, 0, 0x1|0x2|0x10)
 		}
 		peekFrame(true)
-		invalidate(tip)
+		// Publish the new mark's text immediately instead of showing the
+		// previously painted mark until the message queue reaches WM_PAINT.
+		u("RedrawWindow", tip, 0, 0, 0x101)
 	}
 	bg := g("CreateSolidBrush", 0x090705)
 	if bg == 0 {
@@ -406,7 +411,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			defer g("SelectObject", dc, old)
 		}
 		if hwnd == mail.badge || hwnd == mail.panel || hwnd == mail.paper {
-			mail.renderWindow(hwnd, dc, write, prefsFont, valueFont, sideBG, measure)
+			mail.renderWindow(hwnd, dc, write, prefsFont, mailSmall, mailTitle, sideBG, measure)
 			return
 		}
 		if hwnd == prefs {

@@ -22,12 +22,13 @@ struct Hud {
     Atom wm_delete, opacity, completion;
     unsigned int hook_session;
     GC gc;
-    XftFont *font, *heading, *prefs_font, *notice_font, *mail_small, *mail_title;
+    XftFont *font, *heading, *prefs_font, *notice_font, *mail_small, *mail_title, *mail_header_font;
     XftDraw *tip_draw, *prefs_draw, *notice_draw, *mail_draw, *bar_draw;
     XftColor text_color, muted_text, tones[4], number_ink[5];
     char figures[slots][16];
     int figure_tone[slots];
-    Pixmap bitmap;
+    Pixmap bitmap,tip_bitmap;
+    int tip_bitmap_width;
     int bw, bh, visible_slots;
     int tip_x, tip_y, tip_w, tip_h, motion;
     int tip_from_x,tip_from_y,tip_from_w,tip_draw_w,tip_mapped;
@@ -48,7 +49,7 @@ struct Hud {
     unsigned long mail_fill,mail_row_bg,mail_hot_bg,mail_button,mail_rule;
     unsigned long mail_tile[3],mail_accent[3];
     XftColor mail_status[3];
-    int mail_hot;
+    int mail_hot,mail_displayed;
     unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
     int edge, numbers, hover, pressed, moved, outlined, down_x, down_y, grab_x, grab_y;
@@ -80,7 +81,7 @@ static void label(Hud *h,int x,int y,const char *s,XftFont *font,XftColor *ink){
 }
 static void box(Hud *h, int x,int y,unsigned w,unsigned height,unsigned long color) {
     XSetForeground(h->d,h->gc,color);
-    XFillRectangle(h->d,h->tip,h->gc,x,y,w,height);
+    XFillRectangle(h->d,h->tip_bitmap,h->gc,x,y,w,height);
 }
 // Paint the gear directly; Xft has no fallback for missing symbol glyphs.
 static void paint_gear(Hud *h,int x,int y) {
@@ -91,9 +92,9 @@ static void paint_gear(Hud *h,int x,int y) {
         teeth[i]=(XPoint){x+(short)lround(radius*cos(angle)),y+(short)lround(radius*sin(angle))};
     }
     XSetForeground(h->d,h->gc,h->fg);
-    XFillPolygon(h->d,h->tip,h->gc,teeth,32,Nonconvex,CoordModeOrigin);
+    XFillPolygon(h->d,h->tip_bitmap,h->gc,teeth,32,Nonconvex,CoordModeOrigin);
     XSetForeground(h->d,h->gc,h->bg);
-    XFillArc(h->d,h->tip,h->gc,x-4,y-4,8,8,0,360*64);
+    XFillArc(h->d,h->tip_bitmap,h->gc,x-4,y-4,8,8,0,360*64);
 }
 static void shape(Hud *h,Window w,int width,int height,int r,const XRectangle *clip){
     if(!XShapeQueryExtension(h->d,&(int){0},&(int){0}))return;
@@ -310,9 +311,16 @@ static void draw_tip(Hud *h) {
 static void paint_peek(Hud *h) {
     if(h->hover<0)return;
     int width=h->tip_draw_w,height=h->tip_h;
+    if(width<=0||height<=0)return;
     int n=h->counts[h->hover];
     PeekCell *cells=h->cells[h->hover];
-    XClearArea(h->d,h->tip,0,0,0,0,False);
+    if(!h->tip_bitmap || h->tip_bitmap_width<width){
+        if(h->tip_bitmap)XFreePixmap(h->d,h->tip_bitmap);
+        h->tip_bitmap_width=width;
+        h->tip_bitmap=XCreatePixmap(h->d,h->tip,width,height,DefaultDepth(h->d,DefaultScreen(h->d)));
+        XftDrawChange(h->tip_draw,h->tip_bitmap);
+    }
+    box(h,0,0,width,height,h->bg);
     int tx=peek_pad;
     int baseline=(height+h->font->ascent-h->font->descent)/2;
     XRectangle clip={0,0,(unsigned short)(width-gear),height};
@@ -326,6 +334,7 @@ static void paint_peek(Hud *h) {
     }
     XftDrawSetClip(h->tip_draw,NULL);
     paint_gear(h,width-gear/2-3,height/2);
+    XCopyArea(h->d,h->tip_bitmap,h->tip,h->gc,0,0,width,height,0,0);
 }
 static int slot_at(Hud *h,int x,int y){
     int p=(vertical(h)?y:x)-pad;
@@ -426,7 +435,7 @@ void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
 }
 
 
-enum { mail_size=84, mail_header=52, mail_row=64, paper_size=44 };
+enum { mail_size=84, mail_header=72, mail_row=100, paper_size=44 };
 int hud_drag_active(Hud *h) {return h->pressed&&h->moved;}
 void hud_mail_bounds(Hud *h,int *rects) {
     int values[]={h->x,h->y,h->w,h->height,h->sx,h->sy,h->sw,h->sh};
@@ -464,11 +473,11 @@ static void mail_rounded(Hud*h,int x,int y,int w,int height,int r,unsigned long 
 }
 static int mail_target(Hud*h,int x,int y) {
     int width=h->mail_panel_rect[2];
-    if(x>=width-112&&x<width-14&&y>=11&&y<42)return 92;
-    if(x<12||x>=width-12||y<mail_header)return 0;
+    if(x>=width-198&&x<width-22&&y>=14&&y<59)return 92;
+    if(x<16||x>=width-16||y<mail_header)return 0;
     int row=(y-mail_header)/mail_row,inside=(y-mail_header)%mail_row;
-    if(row>=clamp(h->mail_count,0,6)||inside>=mail_row-5)return 0;
-    if(x>=width-60&&x<width-20&&inside>=12&&inside<46)return 320+row;
+    if(row>=h->mail_displayed||inside>=mail_row-8)return 0;
+    if(x>=width-88&&x<width-29&&inside>=20&&inside<78)return 320+row;
     return 300+row;
 }
 static void draw_mail_panel(Hud *h) {
@@ -476,41 +485,40 @@ static void draw_mail_panel(Hud *h) {
     int width=h->mail_panel_rect[2],height=h->mail_panel_rect[3];
     XSetForeground(h->d,h->gc,h->mail_fill);
     XFillRectangle(h->d,h->mail_panel,h->gc,0,0,width,height);
-    mail_text(h->mail_draw,&h->text_color,h->notice_font,21,32,"消息");
+    mail_text(h->mail_draw,&h->text_color,h->mail_header_font,27,51,"消息");
     char count_text[8];snprintf(count_text,sizeof(count_text),"%d",h->mail_count);
-    mail_rounded(h,69,14,30,24,8,h->mail_button);
-    mail_text(h->mail_draw,&h->text_color,h->mail_title,84-text_width(h,h->mail_title,count_text)/2,31,count_text);
-    mail_rounded(h,width-112,11,98,31,8,h->mail_hot==92?h->mail_hot_bg:h->mail_row_bg);
-    mail_text(h->mail_draw,&h->text_color,h->mail_small,width-63-text_width(h,h->mail_small,"全部清空")/2,32,"全部清空");
+    mail_rounded(h,121,17,55,40,11,h->mail_button);
+    mail_text(h->mail_draw,&h->text_color,h->mail_small,148-text_width(h,h->mail_small,count_text)/2,47,count_text);
+    mail_rounded(h,width-198,14,176,45,11,h->mail_hot==92?h->mail_hot_bg:h->mail_row_bg);
+    mail_text(h->mail_draw,&h->text_color,h->mail_small,width-110-text_width(h,h->mail_small,"全部清空")/2,47,"全部清空");
     XSetForeground(h->d,h->gc,h->mail_rule);
-    XDrawLine(h->d,h->mail_panel,h->gc,17,47,width-18,47);
-    int count=clamp(h->mail_count,0,6);
-    for(int i=0;i<count;i++){
+    XDrawLine(h->d,h->mail_panel,h->gc,22,66,width-23,66);
+    for(int i=0;i<h->mail_displayed;i++){
         int y=mail_header+i*mail_row;
         PeekCell*row=&h->mail_rows[i];
         int tone=clamp(row->tone,0,2);
         int hover=h->mail_hot==300+i||h->mail_hot==320+i;
-        mail_rounded(h,12,y,width-24,mail_row-5,11,hover?h->mail_hot_bg:h->mail_row_bg);
-        mail_rounded(h,24,y+14,32,32,9,h->mail_tile[tone]);
+        mail_rounded(h,16,y,width-32,mail_row-8,15,hover?h->mail_hot_bg:h->mail_row_bg);
+        mail_rounded(h,30,y+20,52,52,13,h->mail_tile[tone]);
         XSetForeground(h->d,h->gc,h->mail_accent[tone]);
-        XSetLineAttributes(h->d,h->gc,2,LineSolid,CapRound,JoinRound);
+        XSetLineAttributes(h->d,h->gc,3,LineSolid,CapRound,JoinRound);
         if(!tone){
-            XPoint mark[]={{34,y+30},{39,y+35},{47,y+25}};
+            XPoint mark[]={{46,y+47},{53,y+54},{67,y+37}};
             XDrawLines(h->d,h->mail_panel,h->gc,mark,3,CoordModeOrigin);
         } else if(tone==2){
-            XDrawLine(h->d,h->mail_panel,h->gc,40,y+23,40,y+31);
-            XDrawPoint(h->d,h->mail_panel,h->gc,40,y+36);
+            XDrawLine(h->d,h->mail_panel,h->gc,56,y+34,56,y+47);
+            XDrawPoint(h->d,h->mail_panel,h->gc,56,y+54);
         }
         XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
-        if(tone==1)mail_text(h->mail_draw,&h->mail_status[tone],h->mail_title,36,y+35,"?");
-        mail_text(h->mail_draw,&h->text_color,h->mail_title,69,y+25,row->label);
-        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,69,y+45,row->value);
-        int close_x=width-40,close_y=y+29;
-        if(h->mail_hot==320+i)mail_rounded(h,width-60,y+12,40,34,9,h->mail_button);
+        if(tone==1)mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,56-text_width(h,h->mail_small,"?")/2,y+57,"?");
+        mail_text(h->mail_draw,&h->text_color,h->mail_title,106,y+41,row->label);
+        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,106,y+75,row->value);
+        int close_x=width-58,close_y=y+48;
+        if(h->mail_hot==320+i)mail_rounded(h,width-88,y+20,59,58,12,h->mail_button);
         XSetForeground(h->d,h->gc,h->mail_hot==320+i?h->fg:h->mail_ring);
-        XSetLineAttributes(h->d,h->gc,2,LineSolid,CapRound,JoinRound);
-        XDrawLine(h->d,h->mail_panel,h->gc,close_x-4,close_y-4,close_x+4,close_y+4);
-        XDrawLine(h->d,h->mail_panel,h->gc,close_x-4,close_y+4,close_x+4,close_y-4);
+        XSetLineAttributes(h->d,h->gc,3,LineSolid,CapRound,JoinRound);
+        XDrawLine(h->d,h->mail_panel,h->gc,close_x-7,close_y-7,close_x+7,close_y+7);
+        XDrawLine(h->d,h->mail_panel,h->gc,close_x-7,close_y+7,close_x+7,close_y-7);
         XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
     }
 }
@@ -521,7 +529,8 @@ void hud_mail_row(Hud *h,int i,const char *title,const char *body,int tone){
     snprintf(h->mail_rows[i].label,sizeof(h->mail_rows[i].label),"%s",title);
     snprintf(h->mail_rows[i].value,sizeof(h->mail_rows[i].value),"%s",body);
 }
-void hud_mail_sync(Hud *h,int count,int open,int x,int y,int px,int py,int pw,int ph){
+void hud_mail_sync(Hud *h,int count,int open,int x,int y,int px,int py,int pw,int ph,int displayed){
+    h->mail_displayed=clamp(displayed,0,6);
     int previous=h->mail_count;
     h->mail_count=count;
     if(count>0){
@@ -623,7 +632,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XStoreName(d,h->bar,"Balance HUD");
     XStoreName(d,h->tip,"Balance HUD quota details");
     XSelectInput(d,h->bar,ExposureMask|ButtonPressMask|ButtonReleaseMask|
-                          PointerMotionMask|LeaveWindowMask);
+                          PointerMotionMask|EnterWindowMask|LeaveWindowMask);
     XSelectInput(d,h->tip,ExposureMask|EnterWindowMask|LeaveWindowMask|ButtonPressMask);
     h->gc=XCreateGC(d,h->bar,0,NULL);
     int screen=DefaultScreen(d);
@@ -631,8 +640,9 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     Colormap cmap=DefaultColormap(d,screen);
     h->font=XftFontOpenName(d,screen,"sans:pixelsize=21");
     h->notice_font=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=19");
-    h->mail_small=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=15");
-    h->mail_title=XftFontOpenName(d,screen,"sans:weight=demibold:pixelsize=16");
+    h->mail_small=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=30");
+    h->mail_header_font=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=40");
+    h->mail_title=XftFontOpenName(d,screen,"sans:weight=demibold:pixelsize=40");
     h->mail_fill=color(h,"#101418",h->bg);
     h->mail_row_bg=color(h,"#191f25",h->bg);
     h->mail_hot_bg=color(h,"#222c36",h->bg);
@@ -665,7 +675,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
     XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
     h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
-    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw||!h->notice_draw||!h->notice_font||!h->mail_draw||!h->bar_draw||!h->mail_small||!h->mail_title){hud_close(h);return NULL;}
+    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw||!h->notice_draw||!h->notice_font||!h->mail_draw||!h->bar_draw||!h->mail_small||!h->mail_title||!h->mail_header_font){hud_close(h);return NULL;}
     XftColorAllocName(d,visual,cmap,"#f2f4f6",&h->text_color);
     XftColorAllocName(d,visual,cmap,"#878787",&h->muted_text);
     const char *ink[]={"#f2f4f6","#2dd980","#ffc55e","#ff6878"};
@@ -707,7 +717,9 @@ void hud_close(Hud *h) {
     if(h->notice_font)XftFontClose(h->d,h->notice_font);
     if(h->mail_small)XftFontClose(h->d,h->mail_small);
     if(h->mail_title)XftFontClose(h->d,h->mail_title);
+    if(h->mail_header_font)XftFontClose(h->d,h->mail_header_font);
     if(h->tip_draw)XftDrawDestroy(h->tip_draw);
+    if(h->tip_bitmap)XFreePixmap(h->d,h->tip_bitmap);
     if(h->prefs_draw)XftDrawDestroy(h->prefs_draw);
     if(h->font)XftFontClose(h->d,h->font);
     if(h->prefs_font)XftFontClose(h->d,h->prefs_font);
@@ -811,7 +823,14 @@ int hud_step(Hud *h,int timeout) {
         case LeaveNotify:
             if(h->hover>=0)h->leave_at=millis()+(h->motion?120:0);
             break;
-        case EnterNotify:h->leave_at=0;peek_goal(h,1,millis());break;
+        case EnterNotify:
+            h->leave_at=0;
+            // Re-entering from the peek may deliver EnterNotify without a
+            // MotionNotify; resolve the new mark from the crossing itself.
+            if(e.xcrossing.window==h->bar && !h->pressed)
+                pick(h,e.xcrossing.x,e.xcrossing.y);
+            else peek_goal(h,1,millis());
+            break;
         case MotionNotify:
             if(h->pressed){
                 if(h->outlined||hypot(e.xmotion.x_root-h->down_x,e.xmotion.y_root-h->down_y)>=6)

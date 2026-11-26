@@ -14,9 +14,9 @@ import (
 const (
 	mailSize        = 84
 	mailGap         = 9
-	mailWidth       = 390
-	mailHeader      = 52
-	mailRow         = 64
+	mailWidth       = 608
+	mailHeader      = 72
+	mailRow         = 100
 	mailVisible     = 6
 	mailLimit       = 32
 	mailFlight      = 620 * time.Millisecond
@@ -56,6 +56,7 @@ type mailInbox struct {
 	open         bool
 	revision     int
 	offset       int
+	pageSize     int
 	cues         [5]markCue
 	profiles     map[string]uint32
 	agyCues      map[uint32]markCue
@@ -202,7 +203,7 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 		if action == 93 {
 			step = -1
 		}
-		next := max(0, min(m.offset+step, len(m.items)-mailVisible))
+		next := max(0, min(m.offset+step, len(m.items)-m.pageRows()))
 		if next != m.offset {
 			m.offset = next
 			m.revision++
@@ -212,7 +213,7 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 		copy(m.items[index:], m.items[index+1:])
 		m.items[len(m.items)-1] = mailItem{}
 		m.items = m.items[:len(m.items)-1]
-		m.offset = max(0, min(m.offset, len(m.items)-mailVisible))
+		m.offset = max(0, min(m.offset, len(m.items)-m.pageRows()))
 		m.revision++
 		if len(m.items) == 0 {
 			m.open = false
@@ -223,24 +224,39 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 	return mailItem{}, false
 }
 
+func (m *mailInbox) pageRows() int {
+	if m.pageSize > 0 {
+		return m.pageSize
+	}
+	return mailVisible
+}
+func (m *mailInbox) fitRows(height int) {
+	n := max(1, min(mailVisible, (height-mailHeader-12)/mailRow))
+	if n == m.pageRows() {
+		return
+	}
+	m.pageSize = n
+	m.offset = max(0, min(m.offset, len(m.items)-n))
+	m.revision++
+}
 func (m *mailInbox) visible() []mailItem {
-	return m.items[m.offset:min(len(m.items), m.offset+mailVisible)]
+	return m.items[m.offset:min(len(m.items), m.offset+m.pageRows())]
 }
 
 // Hit testing matches the card geometry. The × is separate from the
 // double-click target so dismissing a row can never open its client.
 func mailTarget(x, y, width, rows int) int {
-	if x >= width-112 && x < width-14 && y >= 11 && y < 42 {
+	if x >= width-198 && x < width-22 && y >= 14 && y < 59 {
 		return 92
 	}
-	if x < 12 || x >= width-12 || y < mailHeader {
+	if x < 16 || x >= width-16 || y < mailHeader {
 		return 0
 	}
 	row, inside := (y-mailHeader)/mailRow, (y-mailHeader)%mailRow
-	if row >= rows || inside >= mailRow-5 {
+	if row >= rows || inside >= mailRow-8 {
 		return 0
 	}
-	if x >= width-60 && x < width-20 && inside >= 12 && inside < 46 {
+	if x >= width-88 && x < width-29 && inside >= 20 && inside < 78 {
 		return mailDismissBase + row
 	}
 	return mailOpenBase + row
