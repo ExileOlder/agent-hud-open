@@ -1,0 +1,182 @@
+package main
+
+import (
+	"math"
+	"time"
+
+	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
+)
+
+// Native port of Agent HUD's dock tail (end-geometry.ts: trailing circle, 6px
+// gap, fallback to the head side when out of room) and its paper silhouette
+// (flight-plan.ts). The inbox stores only a routing ID and a fixed status.
+const (
+	mailSize    = 84
+	mailGap     = 9
+	mailWidth   = 390
+	mailHeader  = 48
+	mailRow     = 52
+	mailVisible = 6
+	mailLimit   = 32
+	mailFlight  = 620 * time.Millisecond
+)
+
+type mailRect struct{ x, y, w, h int }
+type mailPoint struct{ x, y float64 }
+type mailItem struct {
+	agent int
+	event codexnotice.Event
+}
+type mailInbox struct {
+	items, queue []mailItem
+	started      time.Time
+	open         bool
+	revision     int
+	offset       int
+}
+
+func (m *mailInbox) receive(item mailItem, now time.Time, motion bool) {
+	if !motion {
+		m.land(item)
+		return
+	}
+	if len(m.queue) == mailLimit {
+		m.land(item)
+		return
+	}
+	m.queue = append(m.queue, item)
+	if m.started.IsZero() {
+		m.started = now
+	}
+}
+func (m *mailInbox) land(item mailItem) {
+	m.revision++
+	m.offset = 0
+	m.items = append([]mailItem{item}, m.items...)
+	if len(m.items) > mailLimit {
+		m.items = m.items[:mailLimit]
+	}
+}
+func (m *mailInbox) advance(now time.Time, motion bool) {
+	if !motion {
+		for _, item := range m.queue {
+			m.land(item)
+		}
+		m.queue = nil
+		m.started = time.Time{}
+		return
+	}
+	if len(m.queue) > 0 && now.Sub(m.started) >= mailFlight {
+		m.land(m.queue[0])
+		m.queue = m.queue[1:]
+		m.started = time.Time{}
+		if len(m.queue) > 0 {
+			m.started = now
+		}
+	}
+}
+func (m *mailInbox) action(action int) (mailItem, bool) {
+	switch {
+	case action == 90:
+		m.open = len(m.items) > 0
+	case action == 91:
+		m.open = false
+	case action == 92:
+		m.items = nil
+		m.revision++
+		m.open = false
+		m.offset = 0
+	case action == 93 || action == 94:
+		step := 1
+		if action == 93 {
+			step = -1
+		}
+		next := max(0, min(m.offset+step, len(m.items)-mailVisible))
+		if next != m.offset {
+			m.offset = next
+			m.revision++
+		}
+	case action >= 300 && action < 300+len(m.visible()):
+		return m.visible()[action-300], true
+	}
+	return mailItem{}, false
+}
+
+func (m *mailInbox) visible() []mailItem {
+	return m.items[m.offset:min(len(m.items), m.offset+mailVisible)]
+}
+
+func inboxTail(bar, screen mailRect, edge int) mailRect {
+	r := mailRect{w: mailSize, h: mailSize}
+	if edge%2 == 0 {
+		r.x = bar.x + bar.w + mailGap
+		r.y = bar.y + (bar.h-mailSize)/2
+		if r.x+mailSize > screen.x+screen.w {
+			r.x = bar.x - mailGap - mailSize
+		}
+	} else {
+		r.x = bar.x + (barItem-mailSize)/2
+		r.y = bar.y + bar.h + mailGap
+		if r.y+mailSize > screen.y+screen.h {
+			r.y = bar.y - mailGap - mailSize
+		}
+	}
+	r.x = max(screen.x, min(r.x, screen.x+screen.w-r.w))
+	r.y = max(screen.y, min(r.y, screen.y+screen.h-r.h))
+	return r
+}
+func inboxPanel(tail, bar, screen mailRect, edge, count int) mailRect {
+	r := mailRect{w: min(mailWidth, screen.w), h: mailHeader + min(count, mailVisible)*mailRow + 12}
+	if edge%2 == 0 {
+		r.x = tail.x + (tail.w-r.w)/2
+		r.y = bar.y + bar.h + mailGap
+		if edge == 2 {
+			r.y = bar.y - mailGap - r.h
+		}
+	} else {
+		r.y = tail.y + (tail.h-r.h)/2
+		r.x = bar.x + bar.w + mailGap
+		if edge == 1 {
+			r.x = bar.x - mailGap - r.w
+		}
+	}
+	r.x = max(screen.x, min(r.x, screen.x+screen.w-r.w))
+	r.y = max(screen.y, min(r.y, screen.y+screen.h-r.h))
+	return r
+}
+
+// Like the original dock route, bow into the screen, rotate the plane to
+// follow the tangent, then settle it into the message tail.
+func inboxFlight(bar, tail, screen mailRect, edge, source, step int, norm float64) (mailPoint, float64) {
+	src := mailPoint{float64(bar.x + barPadding + source*step + barItem/2), float64(bar.y + bar.h/2)}
+	if edge%2 == 1 {
+		src = mailPoint{float64(bar.x + barItem/2), float64(bar.y + barPadding + source*barItem + barItem/2)}
+	}
+	dst := mailPoint{float64(tail.x + tail.w/2), float64(tail.y + tail.h/2)}
+	dx, dy := dst.x-src.x, dst.y-src.y
+	norm = clamp01(norm)
+	a := norm * norm * (3 - 2*norm)
+	normals := [...]mailPoint{{0, 1}, {-1, 0}, {0, -1}, {1, 0}}
+	n := normals[edge]
+	bow := min(130, max(45, math.Hypot(dx, dy)*.34))
+	sway := math.Sin(math.Pi*a) * bow
+	pos := mailPoint{src.x + dx*a + n.x*sway, src.y + dy*a + n.y*sway}
+	slope := math.Pi * math.Cos(math.Pi*a) * bow
+	pos.x = max(float64(screen.x+18), min(pos.x, float64(screen.x+screen.w-18)))
+	pos.y = max(float64(screen.y+18), min(pos.y, float64(screen.y+screen.h-18)))
+	return pos, math.Atan2(dy+n.y*slope, dx+n.x*slope)
+}
+
+const paperSize = 44
+
+var paperOutline = [...]mailPoint{{22.5, 37.8}, {0, 0}, {100, 50}, {23.8, 100}, {23.3, 77.1}, {4, 76.3}}
+
+func paperPoints(angle float64) [6]mailPoint {
+	var pts [6]mailPoint
+	s, c := math.Sincos(angle)
+	for i, p := range paperOutline {
+		x, y := (p.x-50)*.31, (p.y-50)*.25
+		pts[i] = mailPoint{paperSize/2 + c*x - s*y, paperSize/2 + s*x + c*y}
+	}
+	return pts
+}

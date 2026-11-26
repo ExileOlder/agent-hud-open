@@ -51,18 +51,18 @@ Licensed under Apache-2.0; the upstream license is kept in LICENSE.
 ## Local notifications
 
 With the HUD open, new Codex turns that finish and pending Codex Desktop question
-cards trigger a brief notice. Balance HUD reads event types and IDs from Codex's
-local history projection. It does not show the answer, question, or option text.
+cards send a paper plane to the message badge at the end of the dock. Hover or
+click the badge to open the message list. Balance HUD reads event types and IDs
+from Codex's local history projection and shows only a short status.
 Double-click a Codex notice to return to its conversation. Double-click a floating
 mark to open its client via the system's registered handler; the Mistral Vibe mark
 opens its web client. Linux uses the platform's SQLite library, and Windows uses
 its inbox WinSQLite3 library. If the Codex version has no compatible history
 projection, CLI completion hooks are still available.
 
-Hooks from Antigravity, Mistral Vibe, and Claude Code use the same short local
-card. Double-click it to open the client. On Ubuntu, if the HUD is closed
-the hook falls back to the system notification (`notify-send`, from
-`libnotify-bin`); on Windows keep Balance HUD running to receive the card.
+Completion hooks from Antigravity, Mistral Vibe, and Claude Code land in the
+same message list. Double-click a message to open its client. Keep Balance HUD
+running to receive hook messages.
 
 For automatic reminders, add just the indicated completion hook to each client you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
 

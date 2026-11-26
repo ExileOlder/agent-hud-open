@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"image"
 	"os"
 	"runtime"
@@ -22,11 +21,11 @@ import (
 	"unsafe"
 )
 
-func notifyCompletion(ctx context.Context, id int) error {
+func notifyCompletion(_ context.Context, id int) error {
 	if C.hud_post_completion(C.int(id)) != 0 {
 		return nil
 	}
-	return notifySystemCompletion(ctx, id)
+	return errors.New("start Balance HUD before sending a completion reminder")
 }
 
 func runDesktop(fetch func() []result, clients ...settingsTools) error {
@@ -99,23 +98,59 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		go func() { ready <- fetch() }()
 	}
 	refresh()
-	var current codexnotice.Event
-	currentAgent := 0
-	var completions []int
-	showNotice := func(agent int, event codexnotice.Event) {
-		currentAgent, current = agent, event
-		title, body := C.CString(agentNames[agent]), C.CString(noticeCopy(event.Question))
-		C.hud_notice(h, title, body)
-		C.free(unsafe.Pointer(title))
-		C.free(unsafe.Pointer(body))
-	}
+	var mail mailInbox
+	revision := -1
 	notices := tools.notices
+	renderMail := func(now time.Time) {
+		var n [8]C.int
+		C.hud_mail_bounds(h, &n[0])
+		bar := mailRect{int(n[0]), int(n[1]), int(n[2]), int(n[3])}
+		screen := mailRect{int(n[4]), int(n[5]), int(n[6]), int(n[7])}
+		tail := inboxTail(bar, screen, p.Edge)
+		box := inboxPanel(tail, bar, screen, p.Edge, len(mail.items))
+		hidden := C.hud_drag_active(h) != 0
+		if revision != mail.revision {
+			for i, item := range mail.visible() {
+				title, value := C.CString(agentNames[item.agent]), C.CString(noticeCopy(item.event.Question))
+				C.hud_mail_row(h, C.int(i), title, value)
+				C.free(unsafe.Pointer(title))
+				C.free(unsafe.Pointer(value))
+			}
+			revision = mail.revision
+		}
+		count, opened := len(mail.items), C.int(0)
+		if mail.open {
+			opened = 1
+		}
+		if hidden {
+			count, opened = 0, 0
+		}
+		C.hud_mail_sync(h, C.int(count), opened, C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h))
+		if len(mail.queue) > 0 && !hidden {
+			source := completionSlot(mail.queue[0].agent)
+			if source < 0 || source >= p.slotCount() {
+				source = p.slotCount() / 2
+			}
+			_, _, step := barGeometry(p)
+			pt, angle := inboxFlight(bar, tail, screen, p.Edge, source, step, float64(now.Sub(mail.started))/float64(mailFlight))
+			var poly [12]C.int
+			for i, q := range paperPoints(angle) {
+				poly[2*i], poly[2*i+1] = C.int(q.x+.5), C.int(q.y+.5)
+			}
+			C.hud_mail_flight(h, 1, C.int(pt.x)-paperSize/2, C.int(pt.y)-paperSize/2, &poly[0])
+		} else {
+			C.hud_mail_flight(h, 0, 0, 0, nil)
+		}
+	}
 	timer := time.NewTicker(5 * time.Minute)
 	defer timer.Stop()
 	for {
 		timeout := 200
 		if animating {
 			timeout = 32
+		}
+		if len(mail.queue) > 0 {
+			timeout = 16
 		}
 		action := int(C.hud_step(h, C.int(timeout)))
 		switch {
@@ -137,11 +172,14 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		case action >= 10 && action <= 11:
 			panel.page, panel.message = action-10, ""
 			drawSettings()
-		case action == 90:
-			openProvider(completionSlot(currentAgent), current.Thread)
+		case (action >= 90 && action <= 94) || action >= 300:
+			if item, ok := mail.action(action); ok {
+				openProvider(completionSlot(item.agent), item.event.Thread)
+			}
 		case action >= 200:
-			if len(completions) < 32 {
-				completions = append(completions, action-200)
+			agent := action - 200
+			if agent > 0 && agent < len(agentNames) {
+				mail.receive(mailItem{agent: agent}, time.Now(), !p.ReduceMotion)
 			}
 		case action >= 100:
 			openProvider(action-100, "")
@@ -191,20 +229,19 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			refresh()
 		default:
 		}
-		if C.hud_notice_active(h) == 0 {
-			select {
-			case event, ok := <-notices:
-				if !ok {
-					notices = nil
-					break
-				}
-				showNotice(1, event)
-			default:
-				if len(completions) > 0 {
-					showNotice(completions[0], codexnotice.Event{})
-					completions = completions[1:]
-				}
+		select {
+		case event, ok := <-notices:
+			if ok {
+				mail.receive(mailItem{agent: 1, event: event}, time.Now(), !p.ReduceMotion)
+			} else {
+				notices = nil
 			}
+		default:
+		}
+		if len(mail.queue) > 0 || len(mail.items) > 0 || revision != mail.revision {
+			now := time.Now()
+			mail.advance(now, !p.ReduceMotion)
+			renderMail(now)
 		}
 		now, hover := time.Now(), int(C.hud_hover(h))
 		if hover != lastHover {

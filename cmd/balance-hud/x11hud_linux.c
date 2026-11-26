@@ -18,11 +18,11 @@ enum { slots = 5, item = 92, wide = 148, pad = 4, peek_height = 64, peek_pad = 3
 typedef struct { char label[96], value[192]; int tone; } PeekCell;
 struct Hud {
     Display *d;
-    Window root, bar, tip, prefs, notice;
+    Window root, bar, tip, prefs, notice, mail_panel, paper;
     Atom wm_delete, opacity, completion;
     GC gc;
     XftFont *font, *heading, *prefs_font, *notice_font;
-    XftDraw *tip_draw, *prefs_draw, *notice_draw;
+    XftDraw *tip_draw, *prefs_draw, *notice_draw, *mail_draw;
     XftColor text_color, muted_text, tones[4];
     Pixmap bitmap;
     int bw, bh, visible_slots;
@@ -36,9 +36,12 @@ struct Hud {
     long long leave_at, down_at, peek_at;
     double peek_progress;
     int peek_target;
-    long long click_at, notice_click_at, notice_until;
-    int click_slot, notice_visible;
-    char notice_body[128], notice_title[32];
+    long long click_at, mail_click_at, mail_leave_at;
+    int click_slot, mail_count, mail_open, mail_row_click, mail_dirty, paper_shown;
+    int mail_rect[4], mail_panel_rect[4];
+    int paper_xy[12];
+    PeekCell mail_rows[6];
+    unsigned long mail_blue,mail_ring;
     unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
     int edge, numbers, hover, pressed, moved, outlined, down_x, down_y, grab_x, grab_y;
@@ -402,28 +405,106 @@ void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
     hide_tip(h);place(h);XFlush(h->d);
 }
 
-enum { notice_w=320, notice_h=87 };
-static void draw_notice(Hud *h) {
-    if(!h->notice_visible)return;
+
+enum { mail_size=84, mail_header=48, mail_row=52, paper_size=44 };
+int hud_drag_active(Hud *h) {return h->pressed&&h->moved;}
+void hud_mail_bounds(Hud *h,int *rects) {
+    int values[]={h->x,h->y,h->w,h->height,h->sx,h->sy,h->sw,h->sh};
+    memcpy(rects,values,sizeof(values));
+}
+static void mail_text(XftDraw *draw,XftColor *ink,XftFont *font,int x,int y,const char *text){
+    XftDrawStringUtf8(draw,ink,font,x,y,(const FcChar8*)text,strlen(text));
+}
+static void draw_badge(Hud *h) {
+    if(h->mail_count<1)return;
     XClearWindow(h->d,h->notice);
-    XftDrawStringUtf8(h->notice_draw,&h->tones[1],h->prefs_font,20,30,(const FcChar8*)h->notice_title,strlen(h->notice_title));
-    XftDrawStringUtf8(h->notice_draw,&h->text_color,h->notice_font,20,61,
-                        (const FcChar8*)h->notice_body,strlen(h->notice_body));
+    XSetForeground(h->d,h->gc,h->mail_ring);
+    XDrawArc(h->d,h->notice,h->gc,1,1,mail_size-3,mail_size-3,0,360*64);
+    XSetForeground(h->d,h->gc,h->mail_blue);
+    XPoint icon[]={{26,57},{26,31},{56,31},{56,51},{34,51},{26,57}};
+    XSetLineAttributes(h->d,h->gc,2,LineSolid,CapRound,JoinRound);
+    XDrawLines(h->d,h->notice,h->gc,icon,6,CoordModeOrigin);
+    for(int y=36;y<=45;y+=4)XDrawLine(h->d,h->notice,h->gc,33,y,49,y);
+    XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
+    XSetForeground(h->d,h->gc,h->side_bg);
+    XFillArc(h->d,h->notice,h->gc,52,4,30,30,0,360*64);
+    char count[8];snprintf(count,sizeof(count),"%d",h->mail_count);
+    mail_text(h->notice_draw,&h->text_color,h->prefs_font,67-text_width(h,h->prefs_font,count)/2,24,count);
 }
-void hud_notice(Hud *h,const char *title,const char *body) {
-    snprintf(h->notice_title,sizeof(h->notice_title),"%s",title);
-    snprintf(h->notice_body,sizeof(h->notice_body),"%s",body);
-    h->notice_visible=1;h->notice_until=millis()+8000;h->notice_click_at=0;
-    int x=h->edge==1?h->sx+16:h->sx+h->sw-notice_w-16;
-    int y=h->edge==2?h->sy+16:h->sy+h->sh-notice_h-16;
-    XMoveResizeWindow(h->d,h->notice,x,y,notice_w,notice_h);
-    shape(h,h->notice,notice_w,notice_h,17,NULL);
-    XMapRaised(h->d,h->notice);draw_notice(h);XFlush(h->d);
+static void draw_mail_panel(Hud *h) {
+    if(!h->mail_open)return;
+    XClearWindow(h->d,h->mail_panel);
+    int width=h->mail_panel_rect[2];
+    mail_text(h->mail_draw,&h->text_color,h->notice_font,22,31,"消息");
+    mail_text(h->mail_draw,&h->muted_text,h->notice_font,width-103,31,"全部清空");
+    int count=clamp(h->mail_count,0,6);
+    for(int i=0;i<count;i++){
+        int y=mail_header+i*mail_row;
+        XSetForeground(h->d,h->gc,h->side_bg);
+        XFillRectangle(h->d,h->mail_panel,h->gc,15,y,width-30,mail_row-4);
+        mail_text(h->mail_draw,&h->text_color,h->prefs_font,27,y+30,h->mail_rows[i].label);
+        mail_text(h->mail_draw,&h->muted_text,h->notice_font,168,y+30,h->mail_rows[i].value);
+    }
 }
-int hud_notice_active(Hud *h) {return h->notice_visible;}
-static void hide_notice(Hud *h){
-    h->notice_visible=0;h->notice_click_at=0;
-    XUnmapWindow(h->d,h->notice);
+void hud_mail_row(Hud *h,int i,const char *title,const char *body){
+    if(i<0||i>=6)return;
+    h->mail_dirty=1;
+    snprintf(h->mail_rows[i].label,sizeof(h->mail_rows[i].label),"%s",title);
+    snprintf(h->mail_rows[i].value,sizeof(h->mail_rows[i].value),"%s",body);
+}
+void hud_mail_sync(Hud *h,int count,int open,int x,int y,int px,int py,int pw,int ph){
+    int previous=h->mail_count;
+    h->mail_count=count;
+    if(count>0){
+        if(!previous||x!=h->mail_rect[0]||y!=h->mail_rect[1]){
+            XMoveResizeWindow(h->d,h->notice,x,y,mail_size,mail_size);
+            shape(h,h->notice,mail_size,mail_size,mail_size/2,NULL);
+            if(!previous)XMapRaised(h->d,h->notice);
+        }
+        h->mail_rect[0]=x;h->mail_rect[1]=y;
+        if(previous!=count)draw_badge(h);
+    }else if(previous>0)XUnmapWindow(h->d,h->notice);
+    int was=h->mail_open;
+    h->mail_open=open&&count>0;
+    if(h->mail_open){
+        int bounds[]={px,py,pw,ph};
+        if(!was||memcmp(h->mail_panel_rect,bounds,sizeof(bounds))!=0){
+            memcpy(h->mail_panel_rect,bounds,sizeof(bounds));
+            XMoveResizeWindow(h->d,h->mail_panel,px,py,pw,ph);
+            shape(h,h->mail_panel,pw,ph,22,NULL);
+        }
+        if(!was)XMapRaised(h->d,h->mail_panel);
+        if(!was||previous!=count||h->mail_dirty)draw_mail_panel(h);
+        h->mail_dirty=0;
+    }else if(was)XUnmapWindow(h->d,h->mail_panel);
+}
+static void draw_paper(Hud *h) {
+    if(!h->paper_shown)return;
+    XPoint p[7];
+    for(int i=0;i<6;i++)p[i]=(XPoint){h->paper_xy[2*i],h->paper_xy[2*i+1]};
+    p[6]=p[0];
+    XSetForeground(h->d,h->gc,h->fg);
+    XFillPolygon(h->d,h->paper,h->gc,p,6,Nonconvex,CoordModeOrigin);
+    XSetForeground(h->d,h->gc,h->mail_blue);
+    XDrawLines(h->d,h->paper,h->gc,p,7,CoordModeOrigin);
+    XDrawLine(h->d,h->paper,h->gc,p[0].x,p[0].y,p[2].x,p[2].y);
+    XDrawLine(h->d,h->paper,h->gc,p[0].x,p[0].y,p[4].x,p[4].y);
+}
+void hud_mail_flight(Hud *h,int shown,int x,int y,const int *points){
+    if(!shown){if(h->paper_shown)XUnmapWindow(h->d,h->paper);h->paper_shown=0;return;}
+    if(XShapeQueryExtension(h->d,&(int){0},&(int){0})){
+        XPoint poly[6];
+        for(int i=0;i<6;i++)poly[i]=(XPoint){points[2*i],points[2*i+1]};
+        Region r=XPolygonRegion(poly,6,WindingRule),input=XCreateRegion();
+        XShapeCombineRegion(h->d,h->paper,ShapeBounding,0,0,r,ShapeSet);
+        XShapeCombineRegion(h->d,h->paper,ShapeInput,0,0,input,ShapeSet);
+        XDestroyRegion(r);XDestroyRegion(input);
+    }
+    memcpy(h->paper_xy,points,sizeof(h->paper_xy));
+    XMoveResizeWindow(h->d,h->paper,x,y,paper_size,paper_size);
+    if(!h->paper_shown)XMapRaised(h->d,h->paper);
+    h->paper_shown=1;
+    draw_paper(h);
 }
 
 Hud *hud_open(int edge, double offset, int numbers,int motion) {
@@ -460,8 +541,16 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
     h->notice=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
-    XStoreName(d,h->notice,"Balance HUD notification");
-    XSelectInput(d,h->notice,ExposureMask|ButtonPressMask);
+    h->mail_panel=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
+        CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
+    h->paper=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
+        CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
+    XStoreName(d,h->notice,"Balance HUD messages");
+    XStoreName(d,h->mail_panel,"Balance HUD inbox");
+    XStoreName(d,h->paper,"Balance HUD paper flight");
+    XSelectInput(d,h->notice,ExposureMask|ButtonPressMask|EnterWindowMask|LeaveWindowMask);
+    XSelectInput(d,h->mail_panel,ExposureMask|ButtonPressMask|EnterWindowMask|LeaveWindowMask);
+    XSelectInput(d,h->paper,ExposureMask);
     XStoreName(d,h->bar,"Balance HUD");
     XStoreName(d,h->tip,"Balance HUD quota details");
     XSelectInput(d,h->bar,ExposureMask|ButtonPressMask|ButtonReleaseMask|
@@ -474,6 +563,9 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     h->font=XftFontOpenName(d,screen,"sans:pixelsize=21");
     h->notice_font=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=19");
     h->notice_draw=XftDrawCreate(d,h->notice,visual,cmap);
+    h->mail_draw=XftDrawCreate(d,h->mail_panel,visual,cmap);
+    h->mail_ring=color(h,"#74787b",h->fg);
+    h->mail_blue=color(h,"#7eaaff",h->fg);
     h->prefs_font=XftFontOpenName(d,screen,"sans:pixelsize=16");
     h->heading=XftFontOpenName(d,screen,"sans:bold:pixelsize=21");
     h->tip_draw=XftDrawCreate(d,h->tip,visual,cmap);
@@ -489,7 +581,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
     XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
     h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
-    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw||!h->notice_draw||!h->notice_font){hud_close(h);return NULL;}
+    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw||!h->notice_draw||!h->notice_font||!h->mail_draw){hud_close(h);return NULL;}
     XftColorAllocName(d,visual,cmap,"#f2f4f6",&h->text_color);
     XftColorAllocName(d,visual,cmap,"#878787",&h->muted_text);
     const char *ink[]={"#f2f4f6","#2dd980","#ffc55e","#ff6878"};
@@ -520,6 +612,7 @@ int hud_post_completion(int agent) {
 
 void hud_close(Hud *h) {
     if(h->bitmap)XFreePixmap(h->d,h->bitmap);
+    if(h->mail_draw)XftDrawDestroy(h->mail_draw);
     if(h->notice_draw)XftDrawDestroy(h->notice_draw);
     if(h->notice_font)XftFontClose(h->d,h->notice_font);
     if(h->tip_draw)XftDrawDestroy(h->tip_draw);
@@ -555,14 +648,35 @@ int hud_step(Hud *h,int timeout) {
     while(XPending(h->d)){
         XEvent e;
         XNextEvent(h->d,&e);
-        if(e.xany.window==h->notice){
-            if(e.type==Expose&&e.xexpose.count==0)draw_notice(h);
-            if(e.type==ButtonPress&&h->notice_visible){
+        if(e.xany.window==h->paper){
+            if(e.type==Expose&&e.xexpose.count==0)draw_paper(h);
+            continue;
+        }
+        if(e.xany.window==h->notice||e.xany.window==h->mail_panel){
+            int badge=e.xany.window==h->notice;
+            if(e.type==Expose&&e.xexpose.count==0){if(badge)draw_badge(h);else draw_mail_panel(h);}
+            if(e.type==EnterNotify){
+                h->mail_leave_at=0;
+                if(badge&&!h->mail_open)return 90;
+            }
+            if(e.type==LeaveNotify&&h->mail_open)h->mail_leave_at=millis()+180;
+            if(e.type==ButtonPress){
+                if(!badge&&e.xbutton.button==Button4)return 93;
+                if(!badge&&e.xbutton.button==Button5)return 94;
+                if(e.xbutton.button==Button3)return 91;
                 if(e.xbutton.button==Button1){
-                    long long now=millis();
-                    if(h->notice_click_at&&now-h->notice_click_at<=450){hide_notice(h);return 90;}
-                    h->notice_click_at=now;
-                } else if(e.xbutton.button==Button3)hide_notice(h);
+                    if(badge)return 90;
+                    int y=e.xbutton.y;
+                    if(y<mail_header&&e.xbutton.x>h->mail_panel_rect[2]-115)return 92;
+                    if(y>=mail_header){
+                        int row=(y-mail_header)/mail_row;
+                        long long now=millis();
+                        if(row<clamp(h->mail_count,0,6)&&h->mail_click_at&&h->mail_row_click==row&&now-h->mail_click_at<=450){
+                            h->mail_click_at=0;return 300+row;
+                        }
+                        h->mail_click_at=now;h->mail_row_click=row;
+                    }
+                }
             }
             continue;
         }
@@ -642,7 +756,7 @@ int hud_step(Hud *h,int timeout) {
     long long now=millis();
     if(h->leave_at&&now>=h->leave_at){h->leave_at=0;peek_goal(h,0,now);}
     peek_tick(h,now);
-    if(h->notice_visible&&now>=h->notice_until)hide_notice(h);
+    if(h->mail_leave_at&&now>=h->mail_leave_at){h->mail_leave_at=0;return 91;}
     if(h->pressed&&!h->outlined&&millis()-h->down_at>=300){
         h->outlined=1;draw(h);
     }

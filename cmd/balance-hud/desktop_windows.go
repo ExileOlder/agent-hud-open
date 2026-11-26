@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"image"
 	"math"
 	"os"
@@ -104,14 +103,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	defer runtime.UnlockOSThread()
 	p := loadPlacement()
 	rows := view(nil)
-	var bar, tip, notice, prefs uintptr
+	var bar, tip, prefs uintptr
+	var mail winMail
 	var panel panelSettings
 	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 535, 176, 107, 49
-	var messages []int
-	var noticeID int
-	var current codexnotice.Event
 	notices := tools.notices
-	var noticeUntil, noticeClick, iconClick time.Time
+	var iconClick time.Time
 	lastSlot := -1
 	var area, frame rect
 	var hover = -1
@@ -403,12 +400,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			old := g("SelectObject", dc, font)
 			defer g("SelectObject", dc, old)
 		}
-		if hwnd == notice {
-			if noticeID != 0 {
-				body := noticeCopy(current.Question)
-				write(dc, 18, 12, agentNames[noticeID], 0xbde572)
-				write(dc, 18, 42, body, 0xf5eee7)
-			}
+		if hwnd == mail.badge || hwnd == mail.panel || hwnd == mail.paper {
+			mail.renderWindow(hwnd, dc, write, prefsFont, valueFont, sideBG)
 			return
 		}
 		if hwnd == prefs {
@@ -550,36 +543,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		invalidate(bar)
 	}
 
-	showNotice := func() {
-		if notice == 0 || noticeID != 0 {
-			return
-		}
-		if len(messages) > 0 {
-			noticeID, messages = messages[0], messages[1:]
-			current = codexnotice.Event{}
-		} else {
-			select {
-			case event, ok := <-notices:
-				if !ok {
-					notices = nil
-					return
-				}
-				current, noticeID = event, 1
-			default:
-				return
-			}
-		}
-		noticeClick = time.Time{}
-		noticeUntil = time.Now().Add(8 * time.Second)
-		u("SetWindowPos", notice, ^uintptr(0), uintptr(area.Right-336), uintptr(area.Bottom-103), 320, 87, 0x10|0x40)
-		shape(notice, 320, 87, 34)
-		invalidate(notice)
-	}
-	closeNotice := func() {
-		noticeID = 0
-		current = codexnotice.Event{}
-		u("ShowWindow", notice, 0)
-	}
+	renderMail := func(now time.Time) { mail.draw(now, frame, area, p, pressing && moved, shape, invalidate) }
 	handleIconClick := func(m point) bool {
 		_, _, step := dimensions()
 		v := m.X
@@ -605,21 +569,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		return false
 	}
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
-		if hwnd == notice && notice != 0 && noticeID != 0 {
-			switch msg {
-			case 0x202:
-				now := time.Now()
-				if now.Sub(noticeClick) <= 450*time.Millisecond {
-					openProvider(completionSlot(noticeID), current.Thread)
-					closeNotice()
-				} else {
-					noticeClick = now
-				}
-				return 0
-			case 0x205:
-				closeNotice()
-				return 0
+		if action, handled := mail.windowAction(hwnd, msg, wp, lp); handled {
+			if item, ok := mail.action(action); ok {
+				openProvider(completionSlot(item.agent), item.event.Thread)
 			}
+			renderMail(time.Now())
+			return 0
 		}
 		if hwnd == prefs && prefs != 0 {
 			switch msg {
@@ -699,11 +654,9 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				u("PostQuitMessage", 0)
 				return 0
 			case completionMessage:
-				if wp > 0 && wp < uintptr(len(agentNames)) && len(messages) < 32 {
-					messages = append(messages, int(wp))
-					if noticeID == 0 {
-						showNotice()
-					}
+				if wp > 0 && wp < uintptr(len(agentNames)) {
+					mail.receive(mailItem{agent: int(wp)}, time.Now(), !p.ReduceMotion)
+					renderMail(time.Now())
 				}
 				return 0
 			case 0x113: // WM_TIMER
@@ -713,7 +666,16 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 					previousFrames = frames
 					invalidate(bar)
 				}
-				active = active || pressing
+				select {
+				case event, ok := <-notices:
+					if ok {
+						mail.receive(mailItem{agent: 1, event: event}, now, !p.ReduceMotion)
+					} else {
+						notices = nil
+					}
+				default:
+				}
+				active = active || pressing || len(mail.queue) > 0
 				if motionAnimating != active {
 					motionAnimating = active
 					interval := uintptr(200)
@@ -722,10 +684,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 					}
 					u("SetTimer", bar, 1, interval, 0)
 				}
-				if noticeID != 0 && time.Now().After(noticeUntil) {
-					closeNotice()
-				}
-				showNotice()
+				renderMail(now)
 				if pressing {
 					key := uintptr(1)
 					if u("GetSystemMetrics", 23) != 0 {
@@ -842,11 +801,15 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		return fmt.Errorf("cannot create Win32 quota popup")
 	}
 	defer u("DestroyWindow", tip)
-	notice = makeWindow("Balance HUD completion", 0)
-	if notice == 0 {
-		return fmt.Errorf("cannot create Win32 completion popup")
+	mail.badge = makeWindow("Balance HUD messages", 0)
+	mail.panel = makeWindow("Balance HUD inbox", 0)
+	mail.paper = makeWindow("Balance HUD paper flight", 0x20)
+	if mail.badge == 0 || mail.panel == 0 || mail.paper == 0 {
+		return fmt.Errorf("cannot create Win32 message surfaces")
 	}
-	defer u("DestroyWindow", notice)
+	defer u("DestroyWindow", mail.badge)
+	defer u("DestroyWindow", mail.panel)
+	defer u("DestroyWindow", mail.paper)
 	place()
 	const settingsStyle = 0x00ca0000 // normal bordered, titled window with close/minimize
 	size := rect{Right: prefsW, Bottom: prefsH}

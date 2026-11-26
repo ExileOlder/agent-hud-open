@@ -2,8 +2,11 @@
 
 package main
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
-func notifyCompletion(ctx context.Context, id int) error {
-	return notifySystemCompletion(ctx, id)
+func notifyCompletion(context.Context, int) error {
+	return errors.New("completion reminders require the X11 build of Balance HUD")
 }

@@ -16,8 +16,12 @@ void hud_settings_sync(Hud *,int,int,const char *);
 void hud_settings_show(Hud *);
 void hud_appearance(Hud *,int,double,int,int);
 
-void hud_notice(Hud *,const char *,const char *);
 int hud_post_completion(int);
-int hud_notice_active(Hud *);
 
 void hud_slots(Hud *,int);
+
+void hud_mail_bounds(Hud *,int *);
+void hud_mail_row(Hud *,int,const char *,const char *);
+void hud_mail_sync(Hud *,int,int,int,int,int,int,int,int);
+void hud_mail_flight(Hud *,int,int,int,const int *);
+int hud_drag_active(Hud *);

@@ -111,11 +111,12 @@ func TestWindowsNativeSmoke(t *testing.T) {
 			t.Fatalf("PostMessageW(%x) failed", msg)
 		}
 	}
-	var bar, tip, prefs, notice uintptr
+	var bar, tip, prefs, badge, inbox, paper uintptr
 	wait("four-position float is not visible", func() bool {
 		bar, tip = find("Balance HUD"), find("Balance HUD quota details")
-		prefs, notice = find("Balance HUD Settings"), find("Balance HUD completion")
-		return visible(bar) && tip != 0 && prefs != 0 && notice != 0
+		prefs, badge = find("Balance HUD Settings"), find("Balance HUD messages")
+		inbox, paper = find("Balance HUD inbox"), find("Balance HUD paper flight")
+		return visible(bar) && tip != 0 && prefs != 0 && badge != 0 && inbox != 0 && paper != 0
 	})
 	if r := client(bar); r.Right != barItem || r.Bottom != 4*barItem+2*barPadding {
 		t.Fatalf("initial float geometry: %#v", r)
@@ -197,13 +198,16 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	if _, err := input.Write([]byte("q")); err != nil {
 		t.Fatal(err)
 	}
-	wait("question notice did not appear", func() bool { return visible(notice) })
-	post(notice, 0x205, 0, 40, 30)
-	wait("question notice did not dismiss", func() bool { return !visible(notice) })
+	wait("question did not launch a paper flight", func() bool { return visible(paper) })
+	wait("flight did not land at dock inbox", func() bool { return visible(badge) && !visible(paper) })
+	post(badge, 0x202, 0, 40, 40)
+	wait("dock inbox did not open independently", func() bool { return visible(inbox) })
+	post(inbox, 0x202, 0, client(inbox).Right-18, 23)
+	wait("clear did not close badge and inbox", func() bool { return !visible(badge) && !visible(inbox) })
 	if err := notifyCompletion(ctx, 5); err != nil {
 		t.Fatal(err)
 	}
-	wait("separate-process completion did not show a notice", func() bool { return visible(notice) })
+	wait("separate-process completion did not land", func() bool { return visible(badge) })
 	post(bar, 0x10, 0, 0, 0)
 	if err := app.Wait(); err != nil {
 		t.Fatal(err)
