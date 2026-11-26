@@ -112,7 +112,7 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 			g("SelectObject", dc, mailTitle)
 			write(dc, 106, y+10, agentNames[item.agent], 0xf6f4f2)
 			g("SelectObject", dc, mailSmall)
-			write(dc, 106, y+63, item.summary(), mailRGB(accents[tone]))
+			write(dc, 106, y+56, item.summary(), mailRGB(accents[tone]))
 			x, cy := width-58, y+55
 			closeInk := uintptr(0x74787b)
 			if m.hot == mailDismissBase+i {

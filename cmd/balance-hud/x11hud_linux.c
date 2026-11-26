@@ -512,7 +512,7 @@ static void draw_mail_panel(Hud *h) {
         XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
         if(tone==1)mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,56-text_width(h,h->mail_small,"?")/2,y+62,"?");
         mail_text(h->mail_draw,&h->text_color,h->mail_title,106,y+39,row->label);
-        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,106,y+86,row->value);
+        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,106,y+79,row->value);
         int close_x=width-58,close_y=y+55;
         if(h->mail_hot==320+i)mail_rounded(h,width-88,y+26,59,58,12,h->mail_button);
         XSetForeground(h->d,h->gc,h->mail_hot==320+i?h->fg:h->mail_ring);
