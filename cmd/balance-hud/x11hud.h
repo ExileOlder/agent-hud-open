@@ -15,3 +15,6 @@ void hud_settings_row(Hud *,int,const char *,const char *);
 void hud_settings_sync(Hud *,int,int,const char *);
 void hud_settings_show(Hud *);
 void hud_appearance(Hud *,int,double,int,int);
+
+void hud_notice(Hud *,const char *);
+int hud_notice_active(Hud *);

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"github.com/ExileOlder/agent-hud-open/internal/quota"
 )
 
@@ -57,7 +58,19 @@ func main() {
 	}
 	fetch := func() []result { return fetchQuotas(*codex, *agy) }
 	if *desktop {
-		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy}); err != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var notices <-chan codexnotice.Event
+		home := os.Getenv("CODEX_HOME")
+		if home == "" {
+			if dir, err := os.UserHomeDir(); err == nil {
+				home = filepath.Join(dir, ".codex")
+			}
+		}
+		if home != "" {
+			notices = codexnotice.Watch(ctx, home)
+		}
+		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, notices: notices}); err != nil {
 			println(err.Error())
 			os.Exit(1)
 		}

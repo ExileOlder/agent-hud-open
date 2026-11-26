@@ -6,7 +6,7 @@ A quota-focused rewrite of [Agent HUD](https://github.com/jazzenchen/agent-hud-o
 
 Use Go 1.24 or later.
 
-- **Ubuntu/X11**: install the C compiler, pkg-config, libx11-dev, libxrandr-dev, libxext-dev and libxft-dev. Run `CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o build/balance-hud ./cmd/balance-hud`.
+- **Ubuntu/X11**: install the C compiler, pkg-config, libx11-dev, libxrandr-dev, libxext-dev, libxft-dev and libsqlite3-dev. Run `CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o build/balance-hud ./cmd/balance-hud`.
 - **Windows x64**: run `go build -trimpath -ldflags="-s -w -H windowsgui" -o build/balance-hud.exe ./cmd/balance-hud` on Windows, or set `GOOS=windows GOARCH=amd64 CGO_ENABLED=0` to cross-compile from Linux. This build requires native testing on Windows.
 - Run `go test ./...` to test quota decoding and display projection. Tests use fictional accounts.
 
@@ -46,13 +46,24 @@ Use `-desktop=false` for a one-shot JSON read from a terminal build. This output
 
 Licensed under Apache-2.0; the upstream license is kept in LICENSE.
 
-## Completion popups
+## Local notifications
 
-Balance HUD shows a short, local completion reminder. It sends only the agent label, never prompt text, model output or account data. It does not scan conversation logs or run a background notification service. On Ubuntu the system displays it through `notify-send` (`libnotify-bin`); on Windows keep Balance HUD open to receive the message. Test the path with `balance-hud -completed codex` using the installed binary (or `BalanceHUD.exe`).
+With the HUD open, new Codex turns that finish and pending Codex Desktop question
+cards trigger a brief notice. Balance HUD reads event types and IDs from Codex's
+local history projection. It does not show the answer, question, or option text.
+Double-click a Codex notice to return to its conversation. Double-click a floating
+mark to open its client via the system's registered handler; the Mistral Vibe mark
+opens its web client. Linux uses the platform's SQLite library, and Windows uses
+its inbox WinSQLite3 library. If the Codex version has no compatible history
+projection, CLI completion hooks are still available.
+
+Other agents can send a brief local completion reminder with the installed
+`balance-hud -completed agent` command. On Ubuntu, hook-driven reminders use
+`notify-send` (`libnotify-bin`); on Windows keep Balance HUD open to receive them.
 
 For automatic reminders, add just the indicated completion hook to each client you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
 
-- **[Codex](https://developers.openai.com/codex/hooks):** add the handler under `hooks.Stop` in `${CODEX_HOME:-$HOME/.codex}/hooks.json`. Start a new session and approve the hook if prompted.
+- **[Codex](https://developers.openai.com/codex/hooks), only for versions without history integration:** add the handler under `hooks.Stop` in `${CODEX_HOME:-$HOME/.codex}/hooks.json`. Start a new session and approve the hook if prompted.
 
   ```json
   {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed codex -hook","timeout":5}]}]}}

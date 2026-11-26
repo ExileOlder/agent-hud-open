@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"image"
 	"math"
 	"os"
@@ -108,7 +109,10 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 452, 176, 107, 49
 	var messages []int
 	var noticeID int
-	var noticeUntil time.Time
+	var current codexnotice.Event
+	notices := tools.notices
+	var noticeUntil, noticeClick, iconClick time.Time
+	lastSlot := -1
 	var area, frame rect
 	var hover = -1
 	var pressing, moved, outlined bool
@@ -366,8 +370,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		}
 		if hwnd == notice {
 			if noticeID != 0 {
-				write(dc, 12, 8, agentNames[noticeID], 0xbde572)
-				write(dc, 12, 28, "Task complete", 0xf5eee7)
+				body := "Task complete"
+				if current.ID != "" {
+					body = noticeCopy(current.Question)
+				}
+				write(dc, 18, 12, agentNames[noticeID], 0xbde572)
+				write(dc, 18, 42, body, 0xf5eee7)
 			}
 			return
 		}
@@ -511,16 +519,85 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	}
 
 	showNotice := func() {
-		if notice == 0 || len(messages) == 0 {
+		if notice == 0 || noticeID != 0 {
 			return
 		}
-		noticeID = messages[0]
-		messages = messages[1:]
-		noticeUntil = time.Now().Add(5 * time.Second)
-		u("SetWindowPos", notice, ^uintptr(0), uintptr(area.Right-265), uintptr(area.Bottom-68), 250, 54, 0x10|0x40)
+		if len(messages) > 0 {
+			noticeID, messages = messages[0], messages[1:]
+			current = codexnotice.Event{}
+		} else {
+			select {
+			case event, ok := <-notices:
+				if !ok {
+					notices = nil
+					return
+				}
+				current, noticeID = event, 1
+			default:
+				return
+			}
+		}
+		noticeClick = time.Time{}
+		noticeUntil = time.Now().Add(8 * time.Second)
+		u("SetWindowPos", notice, ^uintptr(0), uintptr(area.Right-336), uintptr(area.Bottom-103), 320, 87, 0x10|0x40)
+		shape(notice, 320, 87, 34)
 		invalidate(notice)
 	}
+	closeNotice := func() {
+		noticeID = 0
+		current = codexnotice.Event{}
+		u("ShowWindow", notice, 0)
+	}
+	handleIconClick := func(m point) bool {
+		_, _, step := dimensions()
+		v := m.X
+		if p.Edge%2 != 0 {
+			v = m.Y
+		}
+		if v < barPadding {
+			return false
+		}
+		slot := int((v - barPadding) / step)
+		if slot >= len(rows) {
+			return false
+		}
+		now := time.Now()
+		if slot == lastSlot && now.Sub(iconClick) <= 450*time.Millisecond {
+			iconClick = time.Time{}
+			hide()
+			invalidate(bar)
+			openProvider(slot, "")
+			return true
+		}
+		lastSlot, iconClick = slot, now
+		return false
+	}
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
+		if hwnd == notice && notice != 0 && noticeID != 0 {
+			switch msg {
+			case 0x202:
+				now := time.Now()
+				if now.Sub(noticeClick) <= 450*time.Millisecond {
+					slot := -1
+					switch noticeID {
+					case 1:
+						slot = 0
+					case 2:
+						slot = 1
+					case 3:
+						slot = 3
+					}
+					openProvider(slot, current.Thread)
+					closeNotice()
+				} else {
+					noticeClick = now
+				}
+				return 0
+			case 0x205:
+				closeNotice()
+				return 0
+			}
+		}
 		if hwnd == prefs && prefs != 0 {
 			switch msg {
 			case 0x10:
@@ -622,10 +699,9 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 					u("SetTimer", bar, 1, interval, 0)
 				}
 				if noticeID != 0 && time.Now().After(noticeUntil) {
-					noticeID = 0
-					u("ShowWindow", notice, 0)
-					showNotice()
+					closeNotice()
 				}
+				showNotice()
 				if pressing {
 					key := uintptr(1)
 					if u("GetSystemMetrics", 23) != 0 {
@@ -691,7 +767,11 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				}
 				finishDrag()
 				if !moved {
-					pick(mouse(lp))
+					if m := mouse(lp); !handleIconClick(m) {
+						pick(m)
+					}
+				} else {
+					iconClick = time.Time{}
 				}
 				return 0
 			case 0x205:

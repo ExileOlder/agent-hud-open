@@ -2,13 +2,17 @@ package main
 
 import (
 	"fmt"
+	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"sort"
 	"strings"
 
 	"github.com/ExileOlder/agent-hud-open/internal/quota"
 )
 
-type settingsTools struct{ codex, agy string }
+type settingsTools struct {
+	codex, agy string
+	notices    <-chan codexnotice.Event
+}
 type settingsItem struct{ title, value string }
 type panelSettings struct {
 	page    int

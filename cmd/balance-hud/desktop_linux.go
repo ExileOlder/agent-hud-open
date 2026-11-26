@@ -13,6 +13,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"image"
 	"os"
 	"runtime"
@@ -87,6 +88,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		}
 	}
 	refresh()
+	var current codexnotice.Event
+	notices := tools.notices
 	timer := time.NewTicker(5 * time.Minute)
 	defer timer.Stop()
 	for {
@@ -114,6 +117,10 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		case action >= 10 && action <= 11:
 			panel.page, panel.message = action-10, ""
 			drawSettings()
+		case action == 90:
+			openProvider(0, current.Thread)
+		case action >= 100:
+			openProvider(action-100, "")
 		case action >= 20:
 			changed, reload := panel.apply(&p, action-20, rows, tools)
 			if changed {
@@ -154,6 +161,20 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		case <-timer.C:
 			refresh()
 		default:
+		}
+		if C.hud_notice_active(h) == 0 {
+			select {
+			case event, ok := <-notices:
+				if !ok {
+					notices = nil
+					break
+				}
+				current = event
+				body := C.CString(noticeCopy(event.Question))
+				C.hud_notice(h, body)
+				C.free(unsafe.Pointer(body))
+			default:
+			}
 		}
 		now, hover := time.Now(), int(C.hud_hover(h))
 		if hover != lastHover {

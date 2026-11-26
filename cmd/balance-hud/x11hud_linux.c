@@ -18,11 +18,11 @@ enum { slots = 4, item = 92, wide = 148, pad = 4, peek_height = 64, peek_pad = 3
 typedef struct { char label[96], value[192]; int tone; } PeekCell;
 struct Hud {
     Display *d;
-    Window root, bar, tip, prefs;
+    Window root, bar, tip, prefs, notice;
     Atom wm_delete, opacity;
     GC gc;
-    XftFont *font, *heading, *prefs_font;
-    XftDraw *tip_draw, *prefs_draw;
+    XftFont *font, *heading, *prefs_font, *notice_font;
+    XftDraw *tip_draw, *prefs_draw, *notice_draw;
     XftColor text_color, muted_text, tones[4];
     Pixmap bitmap;
     int bw, bh;
@@ -34,6 +34,9 @@ struct Hud {
     long long leave_at, down_at, peek_at;
     double peek_progress;
     int peek_target;
+    long long click_at, notice_click_at, notice_until;
+    int click_slot, notice_visible;
+    char notice_body[128];
     unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
     int edge, numbers, hover, pressed, moved, outlined, down_x, down_y, grab_x, grab_y;
@@ -250,9 +253,14 @@ static void draw_tip(Hud *h) {
         XftDrawSetClip(h->tip_draw,NULL);
         paint_gear(h,width-gear/2-3,height/2);
 }
+static int slot_at(Hud *h,int x,int y){
+    int p=(vertical(h)?y:x)-pad;
+    int i=p/step(h);
+    return p<0||i>=slots?-1:i;
+}
 static void pick(Hud *h, int x, int y) {
-    int i=((vertical(h)?y:x)-pad)/step(h);
-    if(i<0||i>=slots){hide_tip(h);return;}
+    int i=slot_at(h,x,y);
+    if(i<0){hide_tip(h);return;}
     h->leave_at=0;
 
     if(i!=h->hover){
@@ -337,6 +345,29 @@ void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
     hide_tip(h);place(h);XFlush(h->d);
 }
 
+enum { notice_w=320, notice_h=87 };
+static void draw_notice(Hud *h) {
+    if(!h->notice_visible)return;
+    XClearWindow(h->d,h->notice);
+    XftDrawStringUtf8(h->notice_draw,&h->tones[1],h->prefs_font,20,30,(const FcChar8*)"Codex",5);
+    XftDrawStringUtf8(h->notice_draw,&h->text_color,h->notice_font,20,61,
+                        (const FcChar8*)h->notice_body,strlen(h->notice_body));
+}
+void hud_notice(Hud *h,const char *body) {
+    snprintf(h->notice_body,sizeof(h->notice_body),"%s",body);
+    h->notice_visible=1;h->notice_until=millis()+8000;h->notice_click_at=0;
+    int x=h->edge==1?h->sx+16:h->sx+h->sw-notice_w-16;
+    int y=h->edge==2?h->sy+16:h->sy+h->sh-notice_h-16;
+    XMoveResizeWindow(h->d,h->notice,x,y,notice_w,notice_h);
+    shape(h,h->notice,notice_w,notice_h,17,NULL);
+    XMapRaised(h->d,h->notice);draw_notice(h);XFlush(h->d);
+}
+int hud_notice_active(Hud *h) {return h->notice_visible;}
+static void hide_notice(Hud *h){
+    h->notice_visible=0;h->notice_click_at=0;
+    XUnmapWindow(h->d,h->notice);
+}
+
 Hud *hud_open(int edge, double offset, int numbers,int motion) {
     Display *d = XOpenDisplay(NULL);
     if (!d) return NULL;
@@ -369,6 +400,10 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
     h->tip=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
+    h->notice=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
+        CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
+    XStoreName(d,h->notice,"Balance HUD notification");
+    XSelectInput(d,h->notice,ExposureMask|ButtonPressMask);
     XStoreName(d,h->bar,"Balance HUD");
     XStoreName(d,h->tip,"Balance HUD quota details");
     XSelectInput(d,h->bar,ExposureMask|ButtonPressMask|ButtonReleaseMask|
@@ -379,6 +414,8 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     Visual *visual=DefaultVisual(d,screen);
     Colormap cmap=DefaultColormap(d,screen);
     h->font=XftFontOpenName(d,screen,"sans:pixelsize=21");
+    h->notice_font=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=19");
+    h->notice_draw=XftDrawCreate(d,h->notice,visual,cmap);
     h->prefs_font=XftFontOpenName(d,screen,"sans:pixelsize=16");
     h->heading=XftFontOpenName(d,screen,"sans:bold:pixelsize=21");
     h->tip_draw=XftDrawCreate(d,h->tip,visual,cmap);
@@ -393,7 +430,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
     XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
     h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
-    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw){hud_close(h);return NULL;}
+    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw||!h->notice_draw||!h->notice_font){hud_close(h);return NULL;}
     XftColorAllocName(d,visual,cmap,"#f2f4f6",&h->text_color);
     XftColorAllocName(d,visual,cmap,"#878787",&h->muted_text);
     const char *ink[]={"#f2f4f6","#2dd980","#ffc55e","#ff6878"};
@@ -405,6 +442,8 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
 }
 void hud_close(Hud *h) {
     if(h->bitmap)XFreePixmap(h->d,h->bitmap);
+    if(h->notice_draw)XftDrawDestroy(h->notice_draw);
+    if(h->notice_font)XftFontClose(h->d,h->notice_font);
     if(h->tip_draw)XftDrawDestroy(h->tip_draw);
     if(h->prefs_draw)XftDrawDestroy(h->prefs_draw);
     if(h->font)XftFontClose(h->d,h->font);
@@ -438,6 +477,17 @@ int hud_step(Hud *h,int timeout) {
     while(XPending(h->d)){
         XEvent e;
         XNextEvent(h->d,&e);
+        if(e.xany.window==h->notice){
+            if(e.type==Expose&&e.xexpose.count==0)draw_notice(h);
+            if(e.type==ButtonPress&&h->notice_visible){
+                if(e.xbutton.button==Button1){
+                    long long now=millis();
+                    if(h->notice_click_at&&now-h->notice_click_at<=450){hide_notice(h);return 90;}
+                    h->notice_click_at=now;
+                } else if(e.xbutton.button==Button3)hide_notice(h);
+            }
+            continue;
+        }
         if(e.xany.window==h->prefs){
             if(e.type==Expose&&e.xexpose.count==0)draw_prefs(h);
             if((e.type==ClientMessage&&(Atom)e.xclient.data.l[0]==h->wm_delete)||
@@ -489,10 +539,18 @@ int hud_step(Hud *h,int timeout) {
             if(e.xbutton.button==Button1&&h->pressed){
                 h->pressed=0;h->outlined=0;
                 if(h->moved){
+                    h->click_at=0;
                     drop(h,e.xbutton.x_root,e.xbutton.y_root);
                     XFlush(h->d);return 2;
                 }
-                draw(h);pick(h,e.xbutton.x,e.xbutton.y);
+                draw(h);
+                int i=slot_at(h,e.xbutton.x,e.xbutton.y);
+                long long now=millis();
+                if(i>=0&&i==h->click_slot&&h->click_at&&now-h->click_at<=450){
+                    h->click_at=0;hide_tip(h);return 100+i;
+                }
+                h->click_slot=i;h->click_at=now;
+                pick(h,e.xbutton.x,e.xbutton.y);
             }
             break;
         }
@@ -500,6 +558,7 @@ int hud_step(Hud *h,int timeout) {
     long long now=millis();
     if(h->leave_at&&now>=h->leave_at){h->leave_at=0;peek_goal(h,0,now);}
     peek_tick(h,now);
+    if(h->notice_visible&&now>=h->notice_until)hide_notice(h);
     if(h->pressed&&!h->outlined&&millis()-h->down_at>=300){
         h->outlined=1;draw(h);
     }
