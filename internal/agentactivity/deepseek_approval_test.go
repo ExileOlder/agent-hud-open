@@ -36,7 +36,7 @@ func TestDeepSeekPendingApprovalFollowsFlushedFrameBoundaries(t *testing.T) {
 	a := deepSeekApprovals{path: path}
 	check := func(turn, new, pending int) {
 		t.Helper()
-		if got := a.watch("", "", turn); got != new || len(a.pending) != pending {
+		if got := len(a.watch("", "", turn)); got != new || len(a.pending) != pending {
 			t.Fatalf("turn %d: got %d new, %d pending; want %d new, %d pending", turn, got, len(a.pending), new, pending)
 		}
 	}
@@ -93,7 +93,7 @@ func TestDeepSeekWatcherReceivesAndClearsApproval(t *testing.T) {
 	defer cancel()
 	updates := WatchDeepSeek(ctx, home)
 	first := <-updates
-	if first.Approvals != 1 || !first.ApprovalPending || first.Running || first.Pending {
+	if len(first.Approvals) != 1 || !first.ApprovalPending || first.Running || first.Pending {
 		t.Fatalf("waiting approval reported as %+v", first)
 	}
 	f, err := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0600)
@@ -106,7 +106,7 @@ func TestDeepSeekWatcherReceivesAndClearsApproval(t *testing.T) {
 		t.Fatalf("append decision: %v %v", err, closeErr)
 	}
 	second, ok := <-updates
-	if !ok || second.Approvals != 0 || second.ApprovalPending || !second.Running {
+	if !ok || len(second.Approvals) != 0 || second.ApprovalPending || !second.Running {
 		t.Fatalf("resolved approval reported as %+v", second)
 	}
 }

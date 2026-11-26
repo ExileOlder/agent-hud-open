@@ -32,6 +32,7 @@ type mailItem struct {
 	permission bool
 	profile    uint32
 	account    string
+	key        string
 }
 
 func (item mailItem) tone() int {
@@ -53,6 +54,7 @@ func (item mailItem) summary() string {
 
 type mailInbox struct {
 	items, queue []mailItem
+	statePath    string
 	started      time.Time
 	open         bool
 	revision     int
@@ -68,6 +70,16 @@ func (m *mailInbox) codexApproval(thread approvalThread, now time.Time, motion b
 }
 
 func (m *mailInbox) receive(item mailItem, now time.Time, motion bool) {
+	if key := item.noticeKey(); key != "" {
+		for _, group := range [][]mailItem{m.items, m.queue} {
+			for _, old := range group {
+				if old.agent == item.agent && old.tone() == item.tone() && old.noticeKey() == key {
+					return
+				}
+			}
+		}
+	}
+	defer m.saveNotices()
 	if motion {
 		look := cueDone
 		if item.permission {
@@ -93,12 +105,15 @@ func (m *mailInbox) receive(item mailItem, now time.Time, motion bool) {
 		}
 	}
 	if !motion {
+		m.advance(now, false)
 		m.land(item)
 		return
 	}
 	if len(m.queue) == mailLimit {
-		m.land(item)
-		return
+		// Keep arrival order even when many requests arrive during one flight.
+		m.land(m.queue[0])
+		m.queue = m.queue[1:]
+		m.started = now
 	}
 	m.queue = append(m.queue, item)
 	if m.started.IsZero() {
@@ -214,10 +229,12 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 	case action == 91:
 		m.open = false
 	case action == 92:
-		m.items = nil
+		m.items, m.queue = nil, nil
+		m.started = time.Time{}
 		m.revision++
 		m.open = false
 		m.offset = 0
+		m.saveNotices()
 	case action == 93 || action == 94:
 		step := 1
 		if action == 93 {
@@ -238,6 +255,7 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 		if len(m.items) == 0 {
 			m.open = false
 		}
+		m.saveNotices()
 	case action >= mailOpenBase && action < mailOpenBase+len(m.visible()):
 		return m.visible()[action-mailOpenBase], true
 	}

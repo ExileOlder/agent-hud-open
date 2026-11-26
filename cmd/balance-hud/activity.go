@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,11 +108,11 @@ func (w *workingMarks) updateDeepSeek(state agentactivity.DeepSeekStatus, mail *
 	} else {
 		w.deepSeek = time.Time{}
 	}
-	for range state.Questions {
-		mail.receive(mailItem{agent: deepSeekAgent, event: codexnotice.Event{Question: true}}, now, motion)
+	for _, key := range state.Questions {
+		mail.receive(mailItem{agent: deepSeekAgent, key: key, event: codexnotice.Event{Question: true}}, now, motion)
 	}
-	for range state.Approvals {
-		mail.receive(mailItem{agent: deepSeekAgent, permission: true, event: codexnotice.Event{Question: true}}, now, motion)
+	for _, key := range state.Approvals {
+		mail.receive(mailItem{agent: deepSeekAgent, key: key, permission: true, event: codexnotice.Event{Question: true}}, now, motion)
 	}
 	for range state.Completed {
 		mail.receive(mailItem{agent: deepSeekAgent}, now, motion)
@@ -153,7 +154,8 @@ func (w *workingMarks) updateAntigravityWaits(waits []agentactivity.AntigravityW
 		}
 		next[item] = markCue{look, now}
 		known[id] = next[item]
-		inbox.receive(mailItem{agent: 2, account: item.Account, permission: item.Permission, event: codexnotice.Event{Question: true}}, now, motion)
+		key := fmt.Sprintf("%s/%s/%s/%d", item.Cascade, item.Trajectory, item.Execution, item.Step)
+		inbox.receive(mailItem{agent: 2, account: item.Account, key: key, permission: item.Permission, event: codexnotice.Event{Question: true}}, now, motion)
 	}
 	w.agyWaits = next
 }

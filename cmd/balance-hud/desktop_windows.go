@@ -103,7 +103,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	p := loadPlacement()
 	rows := view(nil)
 	var bar, tip, prefs uintptr
-	mail := winMail{mailInbox: mailInbox{profiles: antigravityProfileKeys()}}
+	mail := winMail{mailInbox: restoredInbox()}
 	var panel panelSettings
 	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 535, 176, 107, 49
 	notices := tools.notices

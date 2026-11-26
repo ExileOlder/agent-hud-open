@@ -129,7 +129,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		ready = fetch()
 	}
 	refresh()
-	mail := mailInbox{profiles: antigravityProfileKeys()}
+	mail := restoredInbox()
 	revision := -1
 	notices := tools.notices
 	var work workingMarks

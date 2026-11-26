@@ -34,7 +34,7 @@ func TestWaitingStateIsIndependentOfInboxAndSessions(t *testing.T) {
 	var mail mailInbox
 	now := time.Now()
 	w.updateCodex(codexnotice.Event{Pending: true}, &mail, now)
-	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, Questions: 1}, &mail, now, false)
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, Questions: []string{"session/question"}}, &mail, now, false)
 	w.hook(hookEvent{agent: 5, phase: hookWait, session: 10}, &mail, now, false)
 	w.hook(hookEvent{agent: 5, phase: hookPermission, session: 20}, &mail, now, false)
 	mail.action(92)
@@ -65,8 +65,8 @@ func TestDeepSeekApprovalKeepsDistinctMailboxAndWaitState(t *testing.T) {
 	var w workingMarks
 	var mail mailInbox
 	now := time.Now()
-	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, Questions: 1}, &mail, now, false)
-	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, ApprovalPending: true, Approvals: 1}, &mail, now.Add(time.Second), false)
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, Questions: []string{"session/question"}}, &mail, now, false)
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, ApprovalPending: true, Approvals: []string{"session/approval"}}, &mail, now.Add(time.Second), false)
 	if w.deepSeekWait.look != cuePermission || len(mail.items) != 2 ||
 		mail.items[0].agent != deepSeekAgent || mail.items[0].summary() != "等你确认一下" || mail.items[1].permission {
 		t.Fatalf("approval failed to take priority: %+v %v", w.deepSeekWait, mail.items)

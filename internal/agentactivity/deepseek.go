@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,8 +17,8 @@ type DeepSeekStatus struct {
 	Running         bool
 	Pending         bool // at least one question remains open
 	ApprovalPending bool
-	Questions       int
-	Approvals       int
+	Questions       []string
+	Approvals       []string
 	Completed       int
 }
 
@@ -100,6 +101,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 					if err != nil || !info.Mode().IsRegular() || now.Sub(info.ModTime()) >= 30*time.Minute {
 						continue
 					}
+					session := strings.TrimSuffix(f.Name(), ".json")
 					old := cache[f.Name()]
 					c := old
 					if c.modified != info.ModTime() {
@@ -116,7 +118,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 						c.questionSeq = rows.Questions.Seq
 						c.turnSeq = rows.Turn.Seq
 						if c.questionCount > 0 && (old.questionCount == 0 || c.questionSeq != old.questionSeq) {
-							state.Questions++
+							state.Questions = append(state.Questions, session+"/"+strconv.Itoa(c.questionSeq))
 						}
 					}
 					if !c.running && c.turnSeq > 0 && c.turnSeq != c.scannedSeq {
@@ -125,7 +127,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 							// Skip pre-existing history or terminal records that stayed unreadable.
 							c.scannedSeq = c.turnSeq
 						default:
-							if ending, ok := readDeepSeekTurnEnd(home, strings.TrimSuffix(f.Name(), ".json"), c.turnSeq); ok {
+							if ending, ok := readDeepSeekTurnEnd(home, session, c.turnSeq); ok {
 								c.scannedSeq = c.turnSeq
 								if ending.successfulSince(started) {
 									state.Completed++
@@ -134,7 +136,9 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 						}
 					}
 					if c.running && !c.approvalDisabled {
-						state.Approvals += c.approvals.watch(home, strings.TrimSuffix(f.Name(), ".json"), *c.openTurn)
+						for _, id := range c.approvals.watch(home, session, *c.openTurn) {
+							state.Approvals = append(state.Approvals, session+"/"+id)
+						}
 					} else {
 						c.approvals = deepSeekApprovals{}
 					}
@@ -145,7 +149,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 					state.Pending = state.Pending || c.questionCount > 0
 				}
 				cache = retain
-				if state.Running != running || state.Pending != pending || state.ApprovalPending != approving || state.Questions > 0 || state.Approvals > 0 || state.Completed > 0 {
+				if state.Running != running || state.Pending != pending || state.ApprovalPending != approving || len(state.Questions) > 0 || len(state.Approvals) > 0 || state.Completed > 0 {
 					select {
 					case out <- state:
 					case <-ctx.Done():

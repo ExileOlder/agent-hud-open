@@ -65,7 +65,10 @@ mark shows a question, approval, or completion gesture when that event arrives.
 Pending questions and approvals observed through a live client state keep
 their mark visible with intermittent movement until that state clears. Clearing the inbox does
 not dismiss a client's outstanding request. Another still-running turn keeps
-its working expression on completion.
+its working expression on completion. The 32 newest uncleared notices are
+kept in a small local file beside appearance settings and restored without
+replaying their paper flights. Only notice types and routing/deduplication
+IDs are stored; clearing the inbox removes the file.
 Balance HUD reads event types and IDs
 from Codex's local history projection and shows only a short status.
 Double-click a Codex notice to return to its conversation. Double-click a floating

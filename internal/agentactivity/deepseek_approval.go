@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -25,11 +26,11 @@ type deepSeekApprovals struct {
 	pending map[string]struct{}
 }
 
-func (a *deepSeekApprovals) watch(home, session string, turn int) int {
+func (a *deepSeekApprovals) watch(home, session string, turn int) []string {
 	if a.path == "" {
 		groups, err := os.ReadDir(filepath.Join(home, "sessions"))
 		if err != nil {
-			return 0
+			return nil
 		}
 		for _, group := range groups {
 			if !group.IsDir() {
@@ -42,28 +43,28 @@ func (a *deepSeekApprovals) watch(home, session string, turn int) int {
 			}
 		}
 		if a.path == "" {
-			return 0
+			return nil
 		}
 	}
 	if a.turn != turn {
 		a.turn, a.info, a.offset, a.pending, a.closed = turn, nil, 0, nil, false
 	}
 	if a.closed {
-		return 0
+		return nil
 	}
 	n, _ := a.read()
 	return n
 }
 
-func (a *deepSeekApprovals) read() (int, bool) {
+func (a *deepSeekApprovals) read() ([]string, bool) {
 	f, err := os.Open(a.path)
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return 0, false
+		return nil, false
 	}
 	offset, pending := a.offset, a.pending
 	if a.info == nil || !os.SameFile(a.info, info) || info.Size() < offset ||
@@ -74,26 +75,27 @@ func (a *deepSeekApprovals) read() (int, bool) {
 		if offset == 0 {
 			a.info, a.offset, a.pending = info, 0, nil
 		}
-		return 0, true
+		return nil, true
 	}
 	stream := io.NewSectionReader(f, offset, info.Size()-offset)
 	dec, err := zstd.NewReader(stream, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(16<<20))
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
 	defer dec.Close()
 	next, closed, ok := deepSeekApprovalTail(dec, a.turn, maps.Clone(pending))
 	if !ok {
-		return 0, false // Writer may still be appending a frame. Retry from the same boundary.
+		return nil, false // Writer may still be appending a frame. Retry from the same boundary.
 	}
-	n := 0
+	var ids []string
 	for id := range next {
 		if _, known := a.pending[id]; !known {
-			n++
+			ids = append(ids, id)
 		}
 	}
+	sort.Strings(ids)
 	a.info, a.offset, a.pending, a.closed = info, info.Size(), next, closed
-	return n, true
+	return ids, true
 }
 
 func deepSeekApprovalTail(r io.Reader, turn int, pending map[string]struct{}) (map[string]struct{}, bool, bool) {
