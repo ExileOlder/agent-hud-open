@@ -15,12 +15,14 @@ import (
 type DeepSeekStatus struct {
 	Running   bool
 	Questions int
+	Completed int
 }
 
 type deepSeekProjection struct {
 	Record struct {
 		Rows struct {
 			Turn struct {
+				Seq   int
 				Value struct {
 					Open *int `json:"openTurnStartSeq"`
 				} `json:"val"`
@@ -70,9 +72,11 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 			modified                   time.Time
 			running                    bool
 			questionCount, questionSeq int
+			turnSeq, scannedSeq        int
 		}
 		cache := map[string]cacheEntry{}
 		running := false
+		started := time.Now()
 		for {
 			now := time.Now()
 			state := DeepSeekStatus{}
@@ -95,16 +99,34 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 							continue
 						}
 						rows := view.Record.Rows
-						c = cacheEntry{info.ModTime(), rows.Turn.Value.Open != nil, len(rows.Questions.Value.Questions.Active), rows.Questions.Seq}
+						c.modified = info.ModTime()
+						c.running = rows.Turn.Value.Open != nil
+						c.questionCount = len(rows.Questions.Value.Questions.Active)
+						c.questionSeq = rows.Questions.Seq
+						c.turnSeq = rows.Turn.Seq
 						if c.questionCount > 0 && (old.questionCount == 0 || c.questionSeq != old.questionSeq) {
 							state.Questions++
+						}
+					}
+					if !c.running && c.turnSeq > 0 && c.turnSeq != c.scannedSeq {
+						switch {
+						case c.modified.Before(started) || now.Sub(c.modified) >= 2*time.Minute:
+							// Skip pre-existing history or terminal records that stayed unreadable.
+							c.scannedSeq = c.turnSeq
+						default:
+							if ending, ok := readDeepSeekTurnEnd(home, strings.TrimSuffix(f.Name(), ".json"), c.turnSeq); ok {
+								c.scannedSeq = c.turnSeq
+								if ending.successfulSince(started) {
+									state.Completed++
+								}
+							}
 						}
 					}
 					retain[f.Name()] = c
 					state.Running = state.Running || (c.running && c.questionCount == 0)
 				}
 				cache = retain
-				if state.Running != running || state.Questions > 0 {
+				if state.Running != running || state.Questions > 0 || state.Completed > 0 {
 					select {
 					case out <- state:
 					case <-ctx.Done():

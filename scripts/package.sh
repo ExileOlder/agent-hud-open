@@ -28,7 +28,7 @@ else
   CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags="-s -w" -o "$stage/$binary" ./cmd/balance-hud
 fi
 BALANCE_HUD_MONITOR_OUT="$stage" bash scripts/build-monitor.sh
-cp README.md LICENSE cmd/balance-hud/artwork/LICENSE-Go-image-font.txt "$stage/"
+cp README.md LICENSE LICENSE-klauspost-compress.txt cmd/balance-hud/artwork/LICENSE-Go-image-font.txt "$stage/"
 cp cmd/balance-hud/artwork/NOTICE.md "$stage/ARTWORK-NOTICE.md"
 
 # An explicit allowlist keeps both archives independent of user config,
@@ -42,7 +42,7 @@ import zipfile
 stage = pathlib.Path(sys.argv[1])
 target = pathlib.Path(sys.argv[2])
 files = (*sys.argv[3:], "README.md", "LICENSE", "LICENSE.agy-auth",
-         "LICENSE-Go-image-font.txt", "ARTWORK-NOTICE.md")
+         "LICENSE-Go-image-font.txt", "LICENSE-klauspost-compress.txt", "ARTWORK-NOTICE.md")
 members = [f"{stage.name}/{name}" for name in files]
 if target.suffix == ".zip":
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED,

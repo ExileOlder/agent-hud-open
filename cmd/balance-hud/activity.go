@@ -70,6 +70,9 @@ func (w *workingMarks) updateDeepSeek(state agentactivity.DeepSeekStatus, mail *
 	for range state.Questions {
 		mail.receive(mailItem{agent: deepSeekAgent, event: codexnotice.Event{Question: true}}, now, motion)
 	}
+	for range state.Completed {
+		mail.receive(mailItem{agent: deepSeekAgent}, now, motion)
+	}
 }
 
 func (w *workingMarks) updateAntigravity(active map[string]agentactivity.Tool, now time.Time) {
