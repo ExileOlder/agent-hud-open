@@ -435,7 +435,7 @@ void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
 }
 
 
-enum { mail_size=84, mail_header=72, mail_row=120, paper_size=44 };
+enum { mail_size=84, mail_header=72, mail_row=108, paper_size=44 };
 int hud_drag_active(Hud *h) {return h->pressed&&h->moved;}
 void hud_mail_bounds(Hud *h,int *rects) {
     int values[]={h->x,h->y,h->w,h->height,h->sx,h->sy,h->sw,h->sh};
@@ -477,7 +477,7 @@ static int mail_target(Hud*h,int x,int y) {
     if(x<16||x>=width-16||y<mail_header)return 0;
     int row=(y-mail_header)/mail_row,inside=(y-mail_header)%mail_row;
     if(row>=h->mail_displayed||inside>=mail_row-12)return 0;
-    if(x>=width-88&&x<width-29&&inside>=26&&inside<84)return 320+row;
+    if(x>=width-88&&x<width-29&&inside>=20&&inside<78)return 320+row;
     return 300+row;
 }
 static void draw_mail_panel(Hud *h) {
@@ -499,6 +499,7 @@ static void draw_mail_panel(Hud *h) {
         int tone=clamp(row->tone,0,2);
         int hover=h->mail_hot==300+i||h->mail_hot==320+i;
         mail_rounded(h,16,y,width-32,mail_row-12,15,hover?h->mail_hot_bg:h->mail_row_bg);
+        y-=6;
         mail_rounded(h,30,y+28,52,52,13,h->mail_tile[tone]);
         XSetForeground(h->d,h->gc,h->mail_accent[tone]);
         XSetLineAttributes(h->d,h->gc,3,LineSolid,CapRound,JoinRound);

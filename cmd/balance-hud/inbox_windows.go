@@ -99,6 +99,7 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 				color = hotBG
 			}
 			fillMailCard(dc, 16, y, width-32, mailRow-12, 15, color)
+			y -= 6
 			tone := item.tone()
 			fillMailCard(dc, 30, y+28, 52, 52, 13, tiles[tone])
 			switch tone {
