@@ -128,12 +128,12 @@ func (m *mailInbox) cueFrames(now time.Time, p placement, rows []row, frames mar
 		if cue.at.IsZero() {
 			continue
 		}
-		fps := 12
+		fps, length := 12, 24
 		if cue.look == cueDone {
-			fps = 16
+			fps, length = 16, cueFrames
 		}
 		frame := int(max(0, now.Sub(cue.at)) * time.Duration(fps) / time.Second)
-		if frame >= cueFrames {
+		if frame >= length {
 			if profile != 0 {
 				delete(m.agyCues, profile)
 			} else {

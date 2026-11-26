@@ -45,7 +45,7 @@ const (
 	barPadding     = 4
 	barItem        = 92
 	barItemNumbers = 148
-	hoverFrames    = 40
+	hoverFrames    = 96
 	atlasCell      = 2 * markRadius
 	hoverColumns   = 8
 	markRadius     = 29

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/rand/v2"
 	"time"
 
 	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
@@ -9,53 +10,116 @@ import (
 const (
 	idleFrames      = 88
 	idleFPS         = 16
-	workFPS         = 12
-	workFrames      = 48
+	hoverFPS        = 24
+	workFPS         = 6
+	workCycle       = 15 * time.Second
+	workFrames      = 104
+	workEntry       = 8
 	workBase        = hoverFrames
 	toolBase        = workBase + workFrames
-	toolFrames      = 32
+	toolFrames      = 40
+	toolFPS         = 8
+	toolCycle       = 4500 * time.Millisecond
 	cueBase         = toolBase + 4*toolFrames
-	cueFrames       = 24
+	cueFrames       = 40
 	pendingBase     = cueBase + 3*cueFrames
 	waitAtlasFrames = 40
 )
 
-// An idle visit wakes after about 20–35 seconds like the original HUD.
-// Give each mark its own clock so they do not animate in lockstep.
-var firstVisit = [...]time.Duration{21 * time.Second, 24 * time.Second, 27 * time.Second, 30 * time.Second, 33 * time.Second}
-var visitPeriod = [...]time.Duration{32 * time.Second, 36 * time.Second, 40 * time.Second, 34 * time.Second, 31 * time.Second}
-
 type markFrames [5]int // zero: logo; negative: idle; workBase and higher: working atlas
 
-func motionFrames(elapsed time.Duration, hover int, sinceHover time.Duration, reduced bool, count int, working ...time.Duration) (markFrames, bool) {
-	var frames markFrames
-	if reduced {
-		return frames, false
+// Each mark has its own idle visit clock. The original delays visits by
+// 20–35s and starts a new wait after the visit, not from the process clock.
+type markRest struct {
+	nextVisit, leftHover time.Time
+	hovered              bool
+	hoverAge             time.Duration
+}
+
+func (r *markRest) frame(now time.Time, hovered bool, hoverAge time.Duration, working bool, age time.Duration) (int, bool) {
+	if working || hovered {
+		r.nextVisit, r.leftHover = time.Time{}, time.Time{}
+		r.hovered, r.hoverAge = hovered, hoverAge
+		if working {
+			n := int(age * workFPS / time.Second)
+			if n >= workEntry {
+				n = workEntry + n%int(workCycle*workFPS/time.Second)
+			}
+			return workBase + n, true
+		}
+		// Play the arrival and greeting once, then stay in the awake portion.
+		n := int(max(0, hoverAge) * hoverFPS / time.Second)
+		const awake = 36
+		if n >= hoverFrames {
+			n = awake + (n-awake)%(hoverFrames-awake)
+		}
+		return n, true
 	}
-	playing := false
-	for i := range count {
-		if i < len(working) && working[i] >= 0 {
-			age := working[i]
-			frames[i] = workBase + int(age*workFPS/time.Second)%workFrames
-			playing = true
-			continue
+	if r.hovered {
+		r.hovered, r.leftHover = false, now
+	}
+	if !r.leftHover.IsZero() {
+		remaining := min(r.hoverAge, 500*time.Millisecond) - now.Sub(r.leftHover)
+		if remaining > 0 {
+			return int(remaining * hoverFPS / time.Second), true
 		}
-		if hover == i {
-			frame := max(0, int(sinceHover*25/time.Second))
-			frames[i] = min(hoverFrames-1, frame)
-			playing = playing || frame < hoverFrames
-			continue
+		r.leftHover = time.Time{}
+	}
+	if r.nextVisit.IsZero() {
+		r.nextVisit = now.Add(20*time.Second + rand.N(15*time.Second))
+	}
+	since := now.Sub(r.nextVisit)
+	if since < 0 {
+		return 0, false
+	}
+	if n := int(since * idleFPS / time.Second); n < idleFrames {
+		return -1 - n, true
+	}
+	r.nextVisit = now.Add(20*time.Second + rand.N(15*time.Second))
+	return 0, false
+}
+
+// Apply the upstream working-look grace period. Flipping between thinking and
+// tools during a single turn should not repeatedly restart the actor.
+type workLook struct {
+	owner, shownAt, wantedAt time.Time
+	shown, wanted            agentactivity.Tool
+	changes                  [4]time.Time
+	guarded                  bool
+}
+
+func (m *workLook) follow(now, owner time.Time, want agentactivity.Tool) (agentactivity.Tool, time.Duration) {
+	if owner.IsZero() {
+		*m = workLook{}
+		return agentactivity.Think, 0
+	}
+	if !owner.Equal(m.owner) {
+		*m = workLook{owner: owner, shownAt: now, shown: want, wanted: want,
+			changes: [4]time.Time{3: now}}
+		return want, 0
+	}
+	if m.guarded && now.Sub(m.shownAt) >= 30*time.Second {
+		m.guarded = false
+		m.changes = [4]time.Time{}
+	}
+	if want == m.shown {
+		m.wantedAt = time.Time{}
+	} else {
+		if m.wantedAt.IsZero() || m.wanted != want {
+			m.wantedAt, m.wanted = now, want
 		}
-		if elapsed < firstVisit[i] {
-			continue
+		guard := 6 * time.Second
+		if m.guarded {
+			guard = 12 * time.Second
 		}
-		frame := int(((elapsed - firstVisit[i]) % visitPeriod[i]) * idleFPS / time.Second)
-		if frame < idleFrames {
-			frames[i] = -frame - 1
-			playing = true
+		if now.Sub(m.wantedAt) >= 2*time.Second && now.Sub(m.shownAt) >= guard {
+			m.shown, m.shownAt, m.wantedAt = want, now, time.Time{}
+			copy(m.changes[:], m.changes[1:])
+			m.changes[3] = now
+			m.guarded = m.guarded || !m.changes[0].IsZero() && now.Sub(m.changes[0]) < 30*time.Second
 		}
 	}
-	return frames, playing
+	return m.shown, now.Sub(m.shownAt)
 }
 
 func workAge(now, started time.Time) time.Duration {
@@ -65,13 +129,8 @@ func workAge(now, started time.Time) time.Duration {
 	return max(0, now.Sub(started))
 }
 
-// Original director switches a shell call to the long-command look at 20s.
 func toolFrame(tool agentactivity.Tool, age time.Duration) int {
-	if tool == agentactivity.Command && age >= 20*time.Second {
-		tool = agentactivity.LongCommand
-		age -= 20 * time.Second
-	}
-	frame := int(max(0, age)*workFPS/time.Second) % toolFrames
+	frame := int((max(0, age) % toolCycle) * toolFPS / time.Second)
 	return toolBase + (int(tool)-1)*toolFrames + frame
 }
 
@@ -103,5 +162,9 @@ func pendingFrame(age time.Duration, look cueLook, reduce bool) (int, bool) {
 		since = (age - slowStart) % slow
 	}
 	frame := int(since * 12 / time.Second)
-	return base + 24 + ((n+1)%2)*8 + min(7, frame), frame < 7
+	settled := 7
+	if look == cueQuestion {
+		settled = 5 // 0.4s in BotMoves
+	}
+	return base + 24 + ((n+1)%2)*8 + min(settled, frame), frame < settled
 }

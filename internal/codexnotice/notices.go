@@ -15,6 +15,7 @@ type Event struct {
 	Question bool
 	Activity bool
 	Working  bool
+	Holding  bool
 	Pending  bool
 	Tool     agentactivity.Tool
 }
@@ -40,14 +41,16 @@ WITH pending AS (
   )
 ),
 active AS (
- SELECT t.thread_id,t.turn_id
- FROM thread_turns t
- WHERE t.status='inProgress'
-  AND max(t.started_at, coalesce((
+ SELECT thread_id, turn_id, observed
+ FROM (
+  SELECT t.thread_id, t.turn_id, max(t.started_at, coalesce((
    SELECT max(coalesce(i.completed_at_ms, i.started_at_ms, i.created_at_ms))/1000
    FROM thread_items i WHERE i.thread_id=t.thread_id AND i.turn_id=t.turn_id
-  ),0)) > CAST(strftime('%s','now') AS INTEGER)-1800
-  AND NOT EXISTS (SELECT 1 FROM pending p WHERE p.thread_id=t.thread_id AND p.turn_id=t.turn_id)
+  ),0)) AS observed
+  FROM thread_turns t WHERE t.status='inProgress'
+   AND NOT EXISTS (SELECT 1 FROM pending p WHERE p.thread_id=t.thread_id AND p.turn_id=t.turn_id)
+ )
+ WHERE observed > CAST(strftime('%s','now') AS INTEGER)-1800
 ),
 tool AS (
  SELECT CASE
@@ -76,12 +79,16 @@ WHERE status='completed' AND completed_at > CAST(strftime('%s','now') AS INTEGER
 UNION ALL
 SELECT thread_id, 'question:'||item_id, 1 FROM pending
 UNION ALL
-SELECT '', '', COALESCE((SELECT kind FROM tool),2) WHERE EXISTS(SELECT 1 FROM active)
+SELECT '', '', COALESCE((SELECT kind FROM tool),
+ CASE WHEN (SELECT max(observed) FROM active) <= CAST(strftime('%s','now') AS INTEGER)-180 THEN 7 ELSE 2 END)
+WHERE EXISTS(SELECT 1 FROM active)
 `
 
 func projection(thread, id string, kind int) Event {
 	event := Event{Thread: thread, ID: id, Question: kind == 1, Activity: kind >= 2, Working: kind >= 2}
-	if event.Activity {
+	if kind == 7 {
+		event.Holding = true
+	} else if event.Activity {
 		event.Tool = agentactivity.Tool(kind - 2)
 	}
 	return event

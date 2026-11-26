@@ -15,8 +15,8 @@ func TestPendingCadenceHoldsAndRepeats(t *testing.T) {
 		moving bool
 	}{
 		{0, 0, true}, {3 * time.Second, 23, false}, {3800 * time.Millisecond, 24, true},
-		{5 * time.Second, 31, false}, {6400 * time.Millisecond, 32, true},
-		{120800 * time.Millisecond, 32, true}, {125 * time.Second, 39, false},
+		{5 * time.Second, 29, false}, {6400 * time.Millisecond, 32, true},
+		{120800 * time.Millisecond, 32, true}, {125 * time.Second, 37, false},
 		{128800 * time.Millisecond, 24, true},
 	} {
 		f, m := pendingFrame(tc.at, cueQuestion, false)

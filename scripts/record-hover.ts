@@ -11,14 +11,16 @@ const query = new URLSearchParams(location.search);
 const tool = query.get("tool") as BotLook | null;
 const cue = query.get("cue") as BotLook | null;
 const compact = tool || cue;
-const cell = compact ? 64 : 80, side = compact ? 43 : 54, count = 40, columns = 8;
+const cell = compact ? 64 : 80, side = compact ? 43 : 54, count = 96, columns = 8;
 const idleFPS = 16, idleCount = 88;
 const idle = query.has("idle");
 const work = query.has("work");
-const workFPS = 12, workCount = 48;
+const workFPS = 6, workCount = 104; // 15s: both gaze sides, breathing and dots
+const toolFPS = 8, toolCount = 40; // 4.5s: 3s of beats, 1.5s of rest
+const doneCount = 40;
 const keys = compact ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
 const wait = cue === "question" || cue === "permission";
-const frames = wait ? 40 : cue ? 24 : tool ? 32 : work ? workCount : idle ? idleCount : count;
+const frames = wait ? 40 : cue ? doneCount : tool ? toolCount : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
 sheet.height = keys.length * frames / columns * cell;
@@ -43,18 +45,20 @@ async function record() {
     motion.fit(form.spec);
     motion.set(botState({look: "idle"}), 0);
     motion.step(0);
-    let start = 0, frameRate = 25;
+    let start = 0, frameRate = 24, lastSample = 0;
     if (cue) {
       frameRate = cue === "done" ? 16 : 12;
       start = frameRate;
       motion.set(botState({look: "thinking"}), 0);
       for (let i = 1; i <= start; i++) motion.step(i / frameRate);
       motion.set(botState({look: cue}), start / frameRate);
+      lastSample = start / frameRate;
     } else if (work || tool) {
       motion.set(botState({look: tool ?? "thinking"}), 0);
-      frameRate = workFPS;
-      start = workFPS;
-      for (let i = 1; i < start; i++) motion.step(i / frameRate);
+      frameRate = tool ? toolFPS : workFPS;
+      // The loop starts after the one-time entrance. Align to the original
+      // movement period so the join preserves gaze/breath/beat phase.
+      start = tool ? frameRate * 4.5 : 0;
     } else if (idle) {
       // Run the upstream visit state machine until the first real movement,
       // respecting its frame clock instead of approximating the motion curves.
@@ -64,6 +68,7 @@ async function record() {
         if (motion.morph !== 0) { start = i; break; }
       }
       if (!start) throw new Error("No upstream idle visit for " + key);
+      lastSample = start / frameRate;
     } else {
       motion.set(botState({look: "idle", hovered: true}), 0);
     }
@@ -73,8 +78,13 @@ async function record() {
       // alternating repeat movements at 3.8s and 6.4s from BotMoves.
       const age = wait && i >= 24
         ? (i < 32 ? 3.8 : 6.4) + ((i - 24) % 8) / frameRate
-        : i / frameRate;
-      motion.step(start / frameRate + age);
+        : work && i >= 8 ? 15 + (i - 8) / frameRate : i / frameRate;
+      const time = start / frameRate + age;
+      if (work && i === frames - 1)
+        motion.set(botState({look: "thinking", holds: true}), lastSample);
+      for (let t = lastSample + 1 / 24; t < time - 0.001; t += 1 / 24) motion.step(t);
+      motion.step(time);
+      lastSample = time;
       renderBot(form, motion, side, 0, scratch);
       const {x, y, footing, rotation, scaleX, scaleY} = motion.pose;
       const left = i % columns * cell, top = (slot * frames / columns + Math.floor(i / columns)) * cell;

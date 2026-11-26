@@ -43,6 +43,8 @@ func antigravityProfileKeys() map[string]uint32 {
 }
 
 type workingMarks struct {
+	rest                    [5]markRest
+	looks                   [5]workLook
 	codex                   workClock
 	deepSeek                time.Time
 	agy                     map[string]workClock
@@ -71,6 +73,7 @@ func (w *workingMarks) updateCodex(e codexnotice.Event, inbox *mailInbox, now ti
 	if w.codex.started.IsZero() {
 		w.codex.started = now
 	}
+	w.codex.holds = e.Holding
 	if w.codex.poseAt.IsZero() || w.codex.tool != e.Tool {
 		w.codex.tool, w.codex.poseAt = e.Tool, now
 	}
@@ -122,6 +125,7 @@ func (w *workingMarks) updateAntigravity(active map[string]agentactivity.Tool, n
 type workClock struct {
 	started, last, poseAt time.Time
 	tool                  agentactivity.Tool
+	holds                 bool
 }
 
 func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion bool) {
@@ -210,33 +214,46 @@ func (w *workingMarks) ages(rows []row, now time.Time) [5]time.Duration {
 }
 
 func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hover int, p placement) (markFrames, bool) {
-	ages := w.ages(rows, now)
-	frames, active := motionFrames(now.Sub(start), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount(), ages[:]...)
+	var frames markFrames
 	if p.ReduceMotion {
-		return w.applyWaiting(frames, active, p, now)
+		return w.applyWaiting(frames, false, p, now)
 	}
-	if w.codex.tool != agentactivity.Think {
-		frames[0] = toolFrame(w.codex.tool, now.Sub(w.codex.poseAt))
-	}
-	for slot := 1; slot <= 2; slot++ {
-		if clock := w.agy[strings.ToLower(rows[slot].Identity)]; clock.tool != agentactivity.Think {
-			frames[slot] = toolFrame(clock.tool, now.Sub(clock.poseAt))
-		}
+	ages := w.ages(rows, now)
+	tool := [5]workClock{
+		0: w.codex,
+		1: w.agy[strings.ToLower(rows[1].Identity)],
+		2: w.agy[strings.ToLower(rows[2].Identity)],
 	}
 	for i, sessions := range w.hooks {
-		slot := i + 3
-		if slot >= p.slotCount() {
-			break
-		}
-		var selected workClock
 		for _, clock := range sessions {
-			if clock.tool != agentactivity.Think && clock.last.After(selected.last) {
-				selected = clock
+			if clock.last.After(tool[i+3].last) {
+				tool[i+3] = clock
 			}
 		}
-		if selected.tool != agentactivity.Think {
-			frames[slot] = toolFrame(selected.tool, now.Sub(selected.poseAt))
+	}
+	active := false
+	for slot := range p.slotCount() {
+		age := ages[slot]
+		frame, moving := w.rest[slot].frame(now, slot == hover, now.Sub(hoverStart), age >= 0, age)
+		var owner time.Time
+		if age >= 0 {
+			owner = tool[slot].started
+			if owner.IsZero() {
+				owner = now.Add(-age)
+			}
 		}
+		want := tool[slot].tool
+		if want == agentactivity.Command && now.Sub(tool[slot].poseAt) >= 20*time.Second {
+			want = agentactivity.LongCommand
+		}
+		kind, phase := w.looks[slot].follow(now, owner, want)
+		if kind != agentactivity.Think {
+			frame = toolFrame(kind, phase)
+		}
+		if tool[slot].holds && kind == agentactivity.Think && slot != hover {
+			frame, moving = workBase+workFrames-1, false
+		}
+		frames[slot], active = frame, active || moving
 	}
 	return w.applyWaiting(frames, active, p, now)
 }

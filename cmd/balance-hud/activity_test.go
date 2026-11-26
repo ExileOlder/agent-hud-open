@@ -56,29 +56,26 @@ func TestHookTracksOverlappingSessionsAndWaits(t *testing.T) {
 
 func TestNativeToolPoseTransitions(t *testing.T) {
 	now := time.Now()
-	p := placement{ShowClaude: true}
 	rows := view(nil)
+	p := placement{ShowClaude: true}
 	var w workingMarks
 	var inbox mailInbox
-	w.hook(hookEvent{5, hookRead, 1}, &inbox, now, false)
-	frames, on := w.frames(rows, now, now, now, -1, p)
-	if !on || frames[4] != toolBase {
-		t.Fatalf("read pose=%v", frames)
-	}
-	w.hook(hookEvent{5, hookEdit, 1}, &inbox, now, false)
-	frames, _ = w.frames(rows, now, now, now, -1, p)
-	if frames[4] != toolBase+toolFrames {
-		t.Fatalf("edit pose=%v", frames)
-	}
 	w.hook(hookEvent{5, hookCommand, 1}, &inbox, now, false)
-	at := now.Add(20 * time.Second)
-	frames, _ = w.frames(rows, at, at, at, -1, p)
-	if frames[4] != toolBase+3*toolFrames {
-		t.Fatalf("long command pose=%v", frames)
+	frame := func(at time.Duration) int {
+		f, _ := w.frames(rows, now.Add(at), now, now, -1, p)
+		return f[4]
 	}
-	w.hook(hookEvent{5, hookWork, 1}, &inbox, at, false)
-	frames, _ = w.frames(rows, at, at, at, -1, p)
-	if frames[4] < workBase || frames[4] >= toolBase {
-		t.Fatalf("thinking pose=%v", frames)
+	if got := frame(0); got != toolBase+2*toolFrames {
+		t.Fatal(got)
+	}
+	if got := frame(20 * time.Second); got >= toolBase+3*toolFrames {
+		t.Fatalf("long tool still needs stabilization: %v", got)
+	}
+	if got := frame(22 * time.Second); got != toolBase+3*toolFrames {
+		t.Fatalf("long command pose: %v", got)
+	}
+	w.hook(hookEvent{5, hookComplete, 1}, &inbox, now.Add(23*time.Second), false)
+	if got := frame(23 * time.Second); got >= workBase {
+		t.Fatalf("finishing stops the working pose: %v", got)
 	}
 }

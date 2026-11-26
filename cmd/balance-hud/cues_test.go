@@ -24,7 +24,7 @@ func TestNoticeCues(t *testing.T) {
 	if frames[0] != cueBase+2*cueFrames+16 {
 		t.Fatalf("completion cue: %v", frames)
 	}
-	frames, playing = m.cueFrames(now.Add(2*time.Second), place, rows, markFrames{}, false)
+	frames, playing = m.cueFrames(now.Add(2500*time.Millisecond), place, rows, markFrames{}, false)
 	if playing || frames != (markFrames{}) {
 		t.Fatalf("expired cues: %v", frames)
 	}
