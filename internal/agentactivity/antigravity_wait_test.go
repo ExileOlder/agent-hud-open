@@ -134,3 +134,33 @@ func TestAntigravityKeepsEachPendingCascadeAndDropsReplacedSummary(t *testing.T)
 		}
 	}
 }
+
+func TestAntigravityNewRequestsVerifyAccountWithoutMovingOldRequests(t *testing.T) {
+	old := AntigravityWait{Cascade: "same-client", Trajectory: "first-task", Step: 1, Account: "first@example.test"}
+	unchanged := old
+	unchanged.Account = ""
+	fresh := AntigravityWait{Cascade: "same-client", Trajectory: "second-task", Step: 2}
+	freshApproval := AntigravityWait{Cascade: "same-client", Trajectory: "third-task", Step: 3, Permission: true}
+	waits := []AntigravityWait{unchanged, fresh, freshApproval}
+	lookups := 0
+	identify := func() string {
+		lookups++
+		return "second@example.test"
+	}
+	attributeAntigravityWaits([]AntigravityWait{old}, waits, identify)
+	if lookups != 1 || waits[0].Account != old.Account ||
+		waits[1].Account != "second@example.test" || waits[2].Account != "second@example.test" {
+		t.Fatalf("switched account was assigned to an existing request or not checked for the new ones: %v (%d)", waits, lookups)
+	}
+	freshUnknown := AntigravityWait{Cascade: "same-client", Trajectory: "unverified-task", Step: 4}
+	next := []AntigravityWait{unchanged, fresh, freshUnknown}
+	attributeAntigravityWaits(waits, next, func() string { return "" })
+	if next[0].Account != old.Account || next[1].Account != "second@example.test" || next[2].Account != "" {
+		t.Fatalf("failed identity check leaked the last account onto a new request: %v", next)
+	}
+	again := []AntigravityWait{freshUnknown, fresh}
+	attributeAntigravityWaits(next, again, identify)
+	if lookups != 1 || again[0].Account != "" || again[1].Account != "second@example.test" {
+		t.Fatalf("unchanged notices were relabeled or repeatedly queried: %v (%d)", again, lookups)
+	}
+}

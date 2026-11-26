@@ -319,6 +319,30 @@ func antigravityWaitHomes(profiles []AntigravityProfile) []string {
 	return homes
 }
 
+// Recheck the running account once for a batch of newly observed requests.
+// An existing request keeps its first attribution even when the client
+// switches account while that request is still in the daemon's summaries.
+func attributeAntigravityWaits(previous, next []AntigravityWait, identify func() string) {
+	prior := make(map[AntigravityWait]string, len(previous))
+	for _, wait := range previous {
+		account := wait.Account
+		wait.Account = ""
+		prior[wait] = account
+	}
+	account, checked := "", false
+	for i, wait := range next {
+		wait.Account = ""
+		if known, ok := prior[wait]; ok {
+			next[i].Account = known
+			continue
+		}
+		if !checked {
+			account, checked = identify(), true
+		}
+		next[i].Account = account
+	}
+}
+
 func WatchAntigravityWaits(ctx context.Context, profiles []AntigravityProfile) <-chan []AntigravityWait {
 	homes := antigravityWaitHomes(profiles)
 	if len(homes) == 0 {
@@ -330,12 +354,10 @@ func WatchAntigravityWaits(ctx context.Context, profiles []AntigravityProfile) <
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
 		type source struct {
-			record     antigravityDaemon
-			transport  *http.Transport
-			client     *http.Client
-			waits      []AntigravityWait
-			account    string
-			identityAt time.Time
+			record    antigravityDaemon
+			transport *http.Transport
+			client    *http.Client
+			waits     []AntigravityWait
 		}
 		sources := make(map[daemonAddress]source)
 		defer func() {
@@ -363,18 +385,17 @@ func WatchAntigravityWaits(ctx context.Context, profiles []AntigravityProfile) <
 					}}
 				}
 				if waits, err := readAntigravityWaits(ctx, src.client, record); err == nil {
-					src.waits = waits
-					if len(waits) == 0 {
-						src.account, src.identityAt = "", time.Time{}
-					} else if time.Since(src.identityAt) >= 15*time.Second {
-						if account, err := antigravityAccount(ctx, src.client, record); err == nil {
-							src.account, src.identityAt = account, time.Now()
+					attributeAntigravityWaits(src.waits, waits, func() string {
+						account, err := antigravityAccount(ctx, src.client, record)
+						if err != nil {
+							return ""
 						}
-					}
+						return account
+					})
+					src.waits = waits
 				}
 				sources[key] = src
 				for _, wait := range src.waits {
-					wait.Account = src.account
 					next[wait] = struct{}{}
 				}
 			}
