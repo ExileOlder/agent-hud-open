@@ -1,0 +1,71 @@
+diff --git a/internal/cli/cmd_login.go b/internal/cli/cmd_login.go
+index 7c53872..73f6539 100644
+--- a/internal/cli/cmd_login.go
++++ b/internal/cli/cmd_login.go
+@@ -25,6 +25,7 @@ func (a *App) cmdLogin(args []string) int {
+ 	region := fs.String("region", "", "Google Cloud region for --gcp (global, us, or eu)")
+ 	noBrowser := fs.Bool("no-browser", false, "only print the authorization URL")
+ 	viaAgy := fs.Bool("via-agy", false, "let agy perform the sign-in flow")
++	monitorOnly := fs.Bool("monitor-only", false, "save credentials only for quota monitoring; leave active clients unchanged")
+ 	agyPath := fs.String("agy", "", "agy executable for OAuth client discovery and --via-agy")
+ 	relaunch := fs.Bool("relaunch", false, "relaunch Antigravity desktop after logging in")
+ 	closeDesktop := fs.Bool("close-desktop", false, "gracefully close Antigravity desktop before syncing")
+@@ -93,6 +94,9 @@ func (a *App) cmdLogin(args []string) int {
+ 		Relaunch:     *relaunch,
+ 		CloseDesktop: *closeDesktop,
+ 	}
++	if *monitorOnly && (*viaAgy || *relaunch || *closeDesktop) {
++		return a.usageFor("login", "--monitor-only cannot be combined with client switching options")
++	}
+ 	if *viaAgy {
+ 		return a.loginViaAgy(*alias, *agyPath, isGCP, projectID, regionValue, deskOpts)
+ 	}
+@@ -103,10 +107,10 @@ func (a *App) cmdLogin(args []string) int {
+ 		}
+ 		return a.failCode("oauth_error", hint, "could not discover the Antigravity OAuth client")
+ 	}
+-	return a.loginOAuth(*alias, effectiveAuthMethod, projectID, regionValue, *noBrowser, deskOpts)
++	return a.loginOAuth(*alias, effectiveAuthMethod, projectID, regionValue, *noBrowser, *monitorOnly, deskOpts)
+ }
+ 
+-func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser bool, deskOpts switchOptions) int {
++func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser, monitorOnly bool, deskOpts switchOptions) int {
+ 	state, err := oauth.NewState()
+ 	if err != nil {
+ 		return a.failCode("oauth_error", "Retry the login flow.", "could not start the OAuth flow")
+@@ -165,6 +169,14 @@ func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser
+ 	if err != nil {
+ 		return a.failCode("oauth_error", "Try signing in again.", "could not prepare the credential document")
+ 	}
++	if monitorOnly {
++		result, err := a.Store.Upsert(raw, alias, false)
++		if err != nil {
++			return a.registryFailure(err, "could not save the monitoring account")
++		}
++		fmt.Fprintf(a.Out, "Monitoring account saved: %s\n", result.Account.DisplayName())
++		return 0
++	}
+ 	a.saveLiveAccount()
+ 	prevKeeper := a.currentDesktopKeeperHint()
+ 	claimLive := a.retainLiveInstallationID()
+diff --git a/internal/cli/spec.go b/internal/cli/spec.go
+index de5e34f..fb101d1 100644
+--- a/internal/cli/spec.go
++++ b/internal/cli/spec.go
+@@ -66,7 +66,7 @@ var commandSpecs = []CommandSpec{
+ 		Usage: []string{
+ 			"agy-auth login [--alias <alias>] [--auth-method <method>]",
+ 			"               [--gcp --project <id> [--region <region>]]",
+-			"               [--no-browser] [--via-agy] [--agy <path>] [--relaunch] [--close-desktop]",
++			"               [--no-browser] [--via-agy] [--agy <path>] [--relaunch] [--close-desktop] [--monitor-only]",
+ 		},
+ 		Description: "Add an account through Google OAuth. The default flow prints an authorization\n" +
+ 			"URL, opens a browser when possible, and asks for the code shown by\n" +
+@@ -80,6 +80,7 @@ var commandSpecs = []CommandSpec{
+ 			{Flag: "--project <id>", Description: "Google Cloud project ID for --gcp"},
+ 			{Flag: "--region <region>", Description: "Google Cloud region for --gcp: global, us, or eu (default \"global\")"},
+ 			{Flag: "--no-browser", Description: "Only print the authorization URL"},
++			{Flag: "--monitor-only", Description: "Save only to the quota monitor vault; leave active clients unchanged"},
+ 			{Flag: "--via-agy", Description: "Run agy in an isolated login directory; import only on success"},
+ 			{Flag: "--agy <path>", Description: "agy executable for OAuth client discovery or --via-agy (default: search PATH)"},
+ 			{Flag: "--relaunch", Description: "Relaunch Antigravity Desktop after logging in"},

@@ -17,3 +17,6 @@
 *.woff2 binary
 *.sqlite binary
 *.db binary
+
+# Preserve context indentation in the third-party unified diff.
+scripts/agy-monitor.patch -whitespace
