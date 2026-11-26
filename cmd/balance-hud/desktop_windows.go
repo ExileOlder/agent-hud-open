@@ -189,10 +189,15 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	defer g("DeleteObject", prefsFont)
 	started := time.Now()
 	hoverStart := started
-	var motionAnimating bool
+	barInterval := desktopIdleInterval
 	var previousFrames visualFrames
 	var looks lookTransition
 
+	setBarInterval := func(interval int) {
+		if barInterval != interval && u("SetTimer", bar, 1, uintptr(interval), 0) != 0 {
+			barInterval = interval
+		}
+	}
 	invalidate := func(w uintptr) { u("InvalidateRect", w, 0, 0) }
 	place := func() {
 		if u("SystemParametersInfoW", 48, 0, uintptr(unsafe.Pointer(&area)), 0) == 0 {
@@ -325,8 +330,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		if hover != i {
 			hoverStart = time.Now()
 			if !p.ReduceMotion {
-				motionAnimating = true
-				u("SetTimer", bar, 1, 32, 0)
+				setBarInterval(desktopFastInterval)
 				invalidate(bar)
 			}
 		}
@@ -700,23 +704,22 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 			case approvalMessage, codexCompletionMessage:
 				now := time.Now()
 				mail.codexHookNotice(codexThreadFromMessage(wp, lp), msg == approvalMessage, now, !p.ReduceMotion)
+				if len(mail.queue) > 0 {
+					setBarInterval(desktopFastInterval)
+				}
 				renderMail(now)
 				return 1
 			case completionMessage:
 				now := time.Now()
 				work.hook(decodeHook(int(wp), uint32(lp)), &mail.mailInbox, now, !p.ReduceMotion)
+				if len(mail.queue) > 0 {
+					setBarInterval(desktopFastInterval)
+				}
 				renderMail(now)
 				return 0
 			case 0x113: // WM_TIMER
 				now := time.Now()
 				painter.avatars.trim(now)
-				frames, active := work.frames(rows, now, started, hoverStart, hover, p)
-				frames, active = mail.cueFrames(now, p, rows, frames, active)
-				visual, blending := looks.visual(now, frames, p.ReduceMotion)
-				if previousFrames != visual {
-					previousFrames = visual
-					invalidate(bar)
-				}
 				select {
 				case state, ok := <-dshActivity:
 					if ok {
@@ -748,15 +751,18 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 					}
 				default:
 				}
-				active = active || blending || pressing || len(mail.queue) > 0
-				if motionAnimating != active {
-					motionAnimating = active
-					interval := uintptr(200)
-					if active {
-						interval = 32
-					}
-					u("SetTimer", bar, 1, interval, 0)
+				frames, active := work.frames(rows, now, started, hoverStart, hover, p)
+				frames, active = mail.cueFrames(now, p, rows, frames, active)
+				visual, blending := looks.visual(now, frames, p.ReduceMotion)
+				if previousFrames != visual {
+					previousFrames = visual
+					invalidate(bar)
 				}
+				interval := motionInterval(frames, active, blending || hover >= 0 && !p.ReduceMotion)
+				if pressing || len(mail.queue) > 0 {
+					interval = desktopFastInterval
+				}
+				setBarInterval(interval)
 				renderMail(now)
 				if pressing {
 					key := uintptr(1)
@@ -898,7 +904,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		return fmt.Errorf("cannot create Win32 settings window")
 	}
 	defer u("DestroyWindow", prefs)
-	if u("SetTimer", bar, 1, 200, 0) == 0 {
+	if u("SetTimer", bar, 1, desktopIdleInterval, 0) == 0 {
 		return fmt.Errorf("cannot start Win32 quota timer")
 	}
 	defer u("KillTimer", bar, 1)

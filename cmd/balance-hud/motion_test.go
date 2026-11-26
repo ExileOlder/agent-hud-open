@@ -131,3 +131,29 @@ func TestInactivityIsPerMarkAndWaitingWakesItsOwnMark(t *testing.T) {
 		t.Fatalf("reduce motion still animated a sleeping mark: %v", still)
 	}
 }
+
+func TestNativeMotionIntervalKeepsFastVisibleTransitions(t *testing.T) {
+	still := workBase + workFrames - 1
+	for _, tc := range []struct {
+		name             string
+		shown            markFrames
+		moving, blending bool
+		want             int
+	}{
+		{"idle logos", markFrames{}, false, false, 200},
+		{"held model", markFrames{still}, false, false, 200},
+		{"thinking", markFrames{still, workBase + 20}, true, false, 80},
+		{"tools", markFrames{workBase + 20, toolBase}, true, false, 60},
+		{"compaction", markFrames{compactBase}, true, false, 60},
+		{"rest transition", markFrames{}, false, true, 32},
+		{"first hover still shows its logo", markFrames{}, true, true, 32},
+		{"hover above work", markFrames{8, workBase + 20}, true, false, 32},
+		{"mixed with approval", markFrames{compactBase, pendingBase + 2}, true, false, 32},
+		{"settled approval", markFrames{pendingBase + 23}, false, false, 200},
+		{"idle visit", markFrames{-18}, true, false, 32},
+	} {
+		if got := motionInterval(tc.shown, tc.moving, tc.blending); got != tc.want {
+			t.Errorf("%s: %d ms, want %d", tc.name, got, tc.want)
+		}
+	}
+}

@@ -222,3 +222,33 @@ func pendingFrame(age time.Duration, look cueLook, reduce bool) (int, bool) {
 	}
 	return base + 24 + ((n+1)%2)*8 + min(settled, frame), frame < settled
 }
+
+// Native polling only needs to sample a clip fast enough to see each frame.
+// Slow work sheets are 6–8 fps; hover, fades and mail keep the 32 ms cadence.
+const (
+	desktopIdleInterval = 200
+	desktopFastInterval = 32
+)
+
+func motionInterval(frames markFrames, moving, fast bool) int {
+	if fast {
+		return desktopFastInterval
+	}
+	if !moving {
+		return desktopIdleInterval
+	}
+	interval := desktopIdleInterval
+	for _, frame := range frames {
+		switch {
+		case frame == 0 || frame == workBase+workFrames-1:
+			continue // Logo or held thinking pose.
+		case frame >= cueBase || frame < workBase:
+			return desktopFastInterval
+		case frame >= toolBase:
+			interval = min(interval, 60)
+		default:
+			interval = min(interval, 80)
+		}
+	}
+	return interval
+}

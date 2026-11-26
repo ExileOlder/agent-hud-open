@@ -105,7 +105,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	lastHover := -1
 	var previousFrames visualFrames
 	var looks lookTransition
-	animating, dirty := false, true
+	interval, dirty := desktopIdleInterval, true
 	var regions [5 * 4]C.int
 	paint := func(frames visualFrames, full bool) {
 		frame := painter.paintVisuals(rows, p, frames)
@@ -200,10 +200,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	timer := time.NewTicker(5 * time.Minute)
 	defer timer.Stop()
 	for {
-		timeout := 200
-		if animating {
-			timeout = 32
-		}
+		timeout := interval
 		if len(mail.queue) > 0 {
 			timeout = 16
 		}
@@ -335,7 +332,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		frames, active := work.frames(rows, now, started, hoverStart, hover, p)
 		frames, active = mail.cueFrames(now, p, rows, frames, active)
 		visual, blending := looks.visual(now, frames, p.ReduceMotion)
-		animating = active || blending
+		interval = motionInterval(frames, active, blending || hover >= 0 && !p.ReduceMotion)
 		if dirty || visual != previousFrames {
 			paint(visual, dirty)
 			previousFrames, dirty = visual, false
