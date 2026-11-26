@@ -26,24 +26,27 @@ const (
 	waitAtlasFrames = 40
 )
 
-type markFrames [5]int // zero: logo; negative: idle or hover exit; workBase and higher: work/cue atlases
+type markFrames [5]int // zero: logo; negative: idle, asleep or hover exit; workBase and higher: work/cue atlases
 
 const (
-	hoverExit = 500 * time.Millisecond // upstream BotMotion's morph stride
-	exitSteps = 12
+	hoverExit     = 500 * time.Millisecond // upstream BotMotion's morph stride
+	exitSteps     = 12
+	hudSleepAfter = time.Hour
 )
 
-func exitFrame(from, step int) int { return -idleFrames - 1 - from*exitSteps - step }
+func exitFrame(from, step int) int { return -2*idleFrames - 1 - from*exitSteps - step }
 
 // Each mark has its own idle visit clock. The original delays visits by
 // 20–35s and starts a new wait after the visit, not from the process clock.
 type markRest struct {
 	nextVisit, leftHover time.Time
-	hovered              bool
+	lastActivity         time.Time
+	identity             string
+	hovered, sleepVisit  bool
 	hoverFrame           int
 }
 
-func (r *markRest) frame(now time.Time, hovered bool, hoverAge time.Duration, working bool, age time.Duration) (int, bool) {
+func (r *markRest) frame(now time.Time, hovered bool, hoverAge time.Duration, working bool, age time.Duration, asleep bool) (int, bool) {
 	if working || hovered {
 		r.nextVisit, r.leftHover = time.Time{}, time.Time{}
 		r.hovered = hovered && !working
@@ -76,18 +79,39 @@ func (r *markRest) frame(now time.Time, hovered bool, hoverAge time.Duration, wo
 		}
 		r.leftHover = time.Time{}
 	}
-	if r.nextVisit.IsZero() {
-		r.nextVisit = now.Add(20*time.Second + rand.N(15*time.Second))
+	if r.nextVisit.IsZero() || r.sleepVisit != asleep && now.Before(r.nextVisit) {
+		r.scheduleVisit(now, asleep)
 	}
 	since := now.Sub(r.nextVisit)
 	if since < 0 {
 		return 0, false
 	}
 	if n := int(since * idleFPS / time.Second); n < idleFrames {
+		if r.sleepVisit {
+			n += idleFrames
+		}
 		return -1 - n, true
 	}
-	r.nextVisit = now.Add(20*time.Second + rand.N(15*time.Second))
+	r.scheduleVisit(now, asleep)
 	return 0, false
+}
+
+// Mirrors the idle/asleep visit cadence in BotMotion.scheduleVisit.
+func (r *markRest) scheduleVisit(now time.Time, asleep bool) {
+	r.sleepVisit = asleep
+	delay := 20*time.Second + rand.N(15*time.Second)
+	if asleep {
+		delay = 180*time.Second + rand.N(120*time.Second)
+	}
+	r.nextVisit = now.Add(delay)
+}
+
+func (r *markRest) asleep(now, start time.Time) bool {
+	last := r.lastActivity
+	if last.IsZero() {
+		last = start
+	}
+	return now.Sub(last) >= hudSleepAfter
 }
 
 // Apply the upstream working-look grace period. Flipping between thinking and

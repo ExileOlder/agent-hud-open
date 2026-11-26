@@ -15,6 +15,7 @@ func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 	}{
 		{"hover", sheetHover, 3, hoverFrames},
 		{"idle", sheetIdle, 3, idleFrames},
+		{"asleep", sheetSleep, 4, idleFrames},
 		{"work", sheetWork, 3, workFrames},
 		{"Claude hover", sheetClaudeHover, 1, hoverFrames},
 		{"Claude idle", sheetClaudeIdle, 1, idleFrames},
@@ -110,16 +111,16 @@ func TestAllMarksLeaveHoverFromDisplayedPose(t *testing.T) {
 		var rest markRest
 		var cache avatarCache
 		const hoverAge = 3300 * time.Millisecond
-		frame, _ := rest.frame(now, true, hoverAge, false, -1)
+		frame, _ := rest.frame(now, true, hoverAge, false, -1, false)
 		render := func(frame int) []byte {
 			dst := image.NewRGBA(image.Rect(0, 0, markRadius*2, markRadius*2))
 			cache.draw(dst, image.Point{}, slot, frame, now)
 			return dst.Pix
 		}
 		actor, logo := render(frame), render(0)
-		first, _ := rest.frame(now, false, 0, false, -1)
-		mid, _ := rest.frame(now.Add(hoverExit/2), false, 0, false, -1)
-		last, active := rest.frame(now.Add(hoverExit), false, 0, false, -1)
+		first, _ := rest.frame(now, false, 0, false, -1, false)
+		mid, _ := rest.frame(now.Add(hoverExit/2), false, 0, false, -1, false)
+		last, active := rest.frame(now.Add(hoverExit), false, 0, false, -1, false)
 		if !bytes.Equal(render(first), actor) || active || last != 0 {
 			t.Fatalf("slot %d: exit did not connect the last drawn pose to the logo", slot)
 		}

@@ -251,10 +251,19 @@ func (w *workingMarks) ages(rows []row, now time.Time) [5]time.Duration {
 
 func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hover int, p placement) (markFrames, bool) {
 	var frames markFrames
+	ages := w.ages(rows, now)
+	for slot, age := range ages[:p.slotCount()] {
+		r := &w.rest[slot]
+		if (slot == 1 || slot == 2) && !strings.EqualFold(r.identity, rows[slot].Identity) {
+			*r = markRest{identity: rows[slot].Identity, lastActivity: now}
+		}
+		if age >= 0 {
+			r.lastActivity = now
+		}
+	}
 	if p.ReduceMotion {
 		return w.applyWaiting(frames, false, p, now, rows)
 	}
-	ages := w.ages(rows, now)
 	tool := [5]workClock{
 		0: w.codex,
 		1: w.agy[strings.ToLower(rows[1].Identity)],
@@ -270,7 +279,8 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 	active := false
 	for slot := range p.slotCount() {
 		age := ages[slot]
-		frame, moving := w.rest[slot].frame(now, slot == hover, now.Sub(hoverStart), age >= 0, age)
+		r := &w.rest[slot]
+		frame, moving := r.frame(now, slot == hover, now.Sub(hoverStart), age >= 0, age, r.asleep(now, start))
 		var owner time.Time
 		if age >= 0 {
 			owner = tool[slot].started
@@ -322,6 +332,7 @@ func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement,
 		if cue.at.IsZero() {
 			continue
 		}
+		w.rest[i].lastActivity, w.rest[i].nextVisit = now, time.Time{}
 		frame, anim := pendingFrame(now.Sub(cue.at), cue.look, p.ReduceMotion)
 		frames[i] = frame
 		active = active || anim

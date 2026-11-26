@@ -21,13 +21,14 @@ const (
 	sheetQuestion
 	sheetPermission
 	sheetDone
+	sheetSleep
 	sheetCount
 )
 
 var avatarData = [sheetCount][]byte{
 	hoverData, idleData, workData,
 	claudeHoverData, claudeIdleData, claudeWorkData,
-	toolData, cueQuestionData, cuePermissionData, cueDoneData,
+	toolData, cueQuestionData, cuePermissionData, cueDoneData, sleepData,
 }
 
 const avatarIdleRetention = 2 * time.Minute
@@ -88,8 +89,8 @@ func (c *avatarCache) logo(provider, slot int) markatlas.Tile {
 
 func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame int, now time.Time) {
 	slot := [...]int{0, 1, 1, 2, 0}[provider]
-	if frame < -idleFrames {
-		index := -frame - idleFrames - 1
+	if frame < -2*idleFrames {
+		index := -frame - 2*idleFrames - 1
 		if step := index % exitSteps; step == 0 {
 			c.draw(dst, origin, provider, index/exitSteps, now)
 		} else {
@@ -113,6 +114,8 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 		frame, sheet = (frame-toolBase)%toolFrames, sheetTool
 	case frame >= workBase:
 		frame, sheet = frame-workBase, sheetWork
+	case frame < -idleFrames:
+		frame, sheet = -frame-idleFrames-1, sheetSleep
 	case frame < 0:
 		frame, sheet = -frame-1, sheetIdle
 	}

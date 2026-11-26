@@ -13,12 +13,13 @@ const cue = query.get("cue") as BotLook | null;
 const compact = tool || cue;
 const cell = compact ? 64 : 80, side = compact ? 43 : 54, count = 96, columns = 8;
 const idleFPS = 16, idleCount = 88;
-const idle = query.has("idle");
+const asleep = query.has("sleep");
+const idle = query.has("idle") || asleep;
 const work = query.has("work");
 const workFPS = 6, workCount = 104; // contiguous entrance + first steady cycle; final tile is held thinking
 const toolFPS = 8, toolCount = 40; // 4.5s: 3s of beats, 1.5s of rest
 const doneCount = 40;
-const keys = compact ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
+const keys = compact || asleep ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
 const wait = cue === "question" || cue === "permission";
 const frames = wait ? 40 : cue ? doneCount : tool ? toolCount : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
@@ -43,7 +44,7 @@ async function record() {
     const motion = new BotMotion();
     motion.random = new SplitMix(1);
     motion.fit(form.spec);
-    motion.set(botState({look: "idle"}), 0);
+    motion.set(botState({look: asleep ? "asleep" : "idle"}), 0);
     motion.step(0);
     let start = 0, frameRate = 24, lastSample = 0;
     if (cue) {
@@ -63,7 +64,7 @@ async function record() {
       // Run the upstream visit state machine until the first real movement,
       // respecting its frame clock instead of approximating the motion curves.
       frameRate = idleFPS;
-      for (let i = 1; i <= 36 * idleFPS; i++) {
+      for (let i = 1; i <= (asleep ? 301 : 36) * idleFPS; i++) {
         motion.step(i / idleFPS);
         if (motion.morph !== 0) { start = i; break; }
       }

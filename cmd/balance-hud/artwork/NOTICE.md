@@ -19,7 +19,9 @@ positions before the native app draws them. Each provider is compressed
 and decoded separately. The two Antigravity positions share one image cache. The native app
 plays the hover greeting once, keeps the character awake, then eases back to
 the logo from the pose actually shown when the pointer leaves. Each idle visit uses its own 20–35 second
-wait, as in the original. Thinking plays a contiguous entrance into the 15-second gaze, breath,
+wait, as in the original. After an hour without observed work or waiting
+requests, the same renderer provides the sleep visit, spaced 180–300 seconds
+apart. Thinking plays a contiguous entrance into the 15-second gaze, breath,
 and ellipsis period; subsequent cycles skip the entrance. A tool cycle keeps the original 3-second burst and
 1.5-second rest.
 The compact peek is a native adaptation of the Simple dock's AgentPeek layout.
