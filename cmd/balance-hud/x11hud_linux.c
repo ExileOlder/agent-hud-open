@@ -19,7 +19,7 @@ typedef struct { char label[96], value[192]; int tone; } PeekCell;
 struct Hud {
     Display *d;
     Window root, bar, tip, prefs, notice;
-    Atom wm_delete, opacity;
+    Atom wm_delete, opacity, completion;
     GC gc;
     XftFont *font, *heading, *prefs_font, *notice_font;
     XftDraw *tip_draw, *prefs_draw, *notice_draw;
@@ -36,7 +36,7 @@ struct Hud {
     int peek_target;
     long long click_at, notice_click_at, notice_until;
     int click_slot, notice_visible;
-    char notice_body[128];
+    char notice_body[128], notice_title[32];
     unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
     int edge, numbers, hover, pressed, moved, outlined, down_x, down_y, grab_x, grab_y;
@@ -355,11 +355,12 @@ enum { notice_w=320, notice_h=87 };
 static void draw_notice(Hud *h) {
     if(!h->notice_visible)return;
     XClearWindow(h->d,h->notice);
-    XftDrawStringUtf8(h->notice_draw,&h->tones[1],h->prefs_font,20,30,(const FcChar8*)"Codex",5);
+    XftDrawStringUtf8(h->notice_draw,&h->tones[1],h->prefs_font,20,30,(const FcChar8*)h->notice_title,strlen(h->notice_title));
     XftDrawStringUtf8(h->notice_draw,&h->text_color,h->notice_font,20,61,
                         (const FcChar8*)h->notice_body,strlen(h->notice_body));
 }
-void hud_notice(Hud *h,const char *body) {
+void hud_notice(Hud *h,const char *title,const char *body) {
+    snprintf(h->notice_title,sizeof(h->notice_title),"%s",title);
     snprintf(h->notice_body,sizeof(h->notice_body),"%s",body);
     h->notice_visible=1;h->notice_until=millis()+8000;h->notice_click_at=0;
     int x=h->edge==1?h->sx+16:h->sx+h->sw-notice_w-16;
@@ -433,6 +434,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XSetWMNormalHints(d,h->prefs,&hints);
     h->wm_delete=XInternAtom(d,"WM_DELETE_WINDOW",False);
     h->opacity=XInternAtom(d,"_NET_WM_WINDOW_OPACITY",False);
+    h->completion=XInternAtom(d,"_BALANCE_HUD_COMPLETION",False);
     XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
     XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
     h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
@@ -443,9 +445,28 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     for(int i=0;i<4;i++) XftColorAllocName(d,visual,cmap,ink[i],&h->tones[i]);
     place(h);
     XMapRaised(d,h->bar);
+    XSetSelectionOwner(d,h->completion,h->bar,CurrentTime);
     XFlush(d);
     return h;
 }
+// Local X11 IPC: one integer, no identity or conversation data.
+int hud_post_completion(int agent) {
+    Display *d=XOpenDisplay(NULL);
+    if(!d)return 0;
+    Atom message=XInternAtom(d,"_BALANCE_HUD_COMPLETION",True);
+    Window owner=message?XGetSelectionOwner(d,message):None;
+    if(owner==None){XCloseDisplay(d);return 0;}
+    XEvent e={0};
+    e.xclient.type=ClientMessage;
+    e.xclient.window=owner;
+    e.xclient.message_type=message;
+    e.xclient.format=32;
+    e.xclient.data.l[0]=agent;
+    int ok=XSendEvent(d,owner,False,NoEventMask,&e);
+    XCloseDisplay(d);
+    return ok!=0;
+}
+
 void hud_close(Hud *h) {
     if(h->bitmap)XFreePixmap(h->d,h->bitmap);
     if(h->notice_draw)XftDrawDestroy(h->notice_draw);
@@ -506,6 +527,12 @@ int hud_step(Hud *h,int timeout) {
                 if(x>=sidebar_w+28&&y>=prefs_top&&y<prefs_top+h->prefs_count*prefs_row)
                     return 20+(y-prefs_top)/prefs_row;
             }
+            continue;
+        }
+        if(e.type==ClientMessage && e.xclient.window==h->bar &&
+           e.xclient.message_type==h->completion && e.xclient.format==32){
+            long agent=e.xclient.data.l[0];
+            if(agent>=1&&agent<=5)return 200+(int)agent;
             continue;
         }
         switch(e.type){

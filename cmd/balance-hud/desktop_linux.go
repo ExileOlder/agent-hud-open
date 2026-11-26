@@ -11,6 +11,7 @@ package main
 import "C"
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
@@ -20,6 +21,13 @@ import (
 	"time"
 	"unsafe"
 )
+
+func notifyCompletion(ctx context.Context, id int) error {
+	if C.hud_post_completion(C.int(id)) != 0 {
+		return nil
+	}
+	return notifySystemCompletion(ctx, id)
+}
 
 func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	var tools settingsTools
@@ -92,6 +100,15 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	}
 	refresh()
 	var current codexnotice.Event
+	currentAgent := 0
+	var completions []int
+	showNotice := func(agent int, event codexnotice.Event) {
+		currentAgent, current = agent, event
+		title, body := C.CString(agentNames[agent]), C.CString(noticeCopy(event.Question))
+		C.hud_notice(h, title, body)
+		C.free(unsafe.Pointer(title))
+		C.free(unsafe.Pointer(body))
+	}
 	notices := tools.notices
 	timer := time.NewTicker(5 * time.Minute)
 	defer timer.Stop()
@@ -121,7 +138,11 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			panel.page, panel.message = action-10, ""
 			drawSettings()
 		case action == 90:
-			openProvider(0, current.Thread)
+			openProvider(completionSlot(currentAgent), current.Thread)
+		case action >= 200:
+			if len(completions) < 32 {
+				completions = append(completions, action-200)
+			}
 		case action >= 100:
 			openProvider(action-100, "")
 		case action >= 20:
@@ -177,11 +198,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 					notices = nil
 					break
 				}
-				current = event
-				body := C.CString(noticeCopy(event.Question))
-				C.hud_notice(h, body)
-				C.free(unsafe.Pointer(body))
+				showNotice(1, event)
 			default:
+				if len(completions) > 0 {
+					showNotice(completions[0], codexnotice.Event{})
+					completions = completions[1:]
+				}
 			}
 		}
 		now, hover := time.Now(), int(C.hud_hover(h))

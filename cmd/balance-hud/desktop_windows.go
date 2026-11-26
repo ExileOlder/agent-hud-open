@@ -371,10 +371,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		}
 		if hwnd == notice {
 			if noticeID != 0 {
-				body := "Task complete"
-				if current.ID != "" {
-					body = noticeCopy(current.Question)
-				}
+				body := noticeCopy(current.Question)
 				write(dc, 18, 12, agentNames[noticeID], 0xbde572)
 				write(dc, 18, 42, body, 0xf5eee7)
 			}
@@ -579,16 +576,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			case 0x202:
 				now := time.Now()
 				if now.Sub(noticeClick) <= 450*time.Millisecond {
-					slot := -1
-					switch noticeID {
-					case 1:
-						slot = 0
-					case 2:
-						slot = 1
-					case 3:
-						slot = 3
-					}
-					openProvider(slot, current.Thread)
+					openProvider(completionSlot(noticeID), current.Thread)
 					closeNotice()
 				} else {
 					noticeClick = now

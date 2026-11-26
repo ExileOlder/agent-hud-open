@@ -59,9 +59,10 @@ opens its web client. Linux uses the platform's SQLite library, and Windows uses
 its inbox WinSQLite3 library. If the Codex version has no compatible history
 projection, CLI completion hooks are still available.
 
-Other agents can send a brief local completion reminder with the installed
-`balance-hud -completed agent` command. On Ubuntu, hook-driven reminders use
-`notify-send` (`libnotify-bin`); on Windows keep Balance HUD open to receive them.
+Hooks from Antigravity, Mistral Vibe, and Claude Code use the same short local
+card. Double-click it to open the client. On Ubuntu, if the HUD is closed
+the hook falls back to the system notification (`notify-send`, from
+`libnotify-bin`); on Windows keep Balance HUD running to receive the card.
 
 For automatic reminders, add just the indicated completion hook to each client you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
 
@@ -86,6 +87,12 @@ For automatic reminders, add just the indicated completion hook to each client y
   match = "turn_completed"
   command = "'/path/to/balance-hud' -completed mistral -hook"
   timeout = 5
+  ```
+
+- **[Claude Code](https://code.claude.com/docs/en/hooks#stop):** add the handler under `hooks.Stop` in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`. Balance HUD reports finished turns and skips stops with active background tasks or scheduled work.
+
+  ```json
+  {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed claude -hook","timeout":5}]}]}}
   ```
 
 Other clients with a success-only hook can call `balance-hud -completed agent`. In Windows PowerShell commands use `& 'C:/path/to/BalanceHUD.exe' -completed codex -hook` (substitute the client name); in Git Bash use `'C:/path/to/BalanceHUD.exe'` without `&`. This program does not change agent configurations for you.

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-var agentNames = []string{"", "Codex", "Antigravity", "Mistral Vibe", "Agent"}
+var agentNames = []string{"", "Codex", "Antigravity", "Mistral Vibe", "Agent", "Claude Code"}
 
 func completionID(name string) int {
 	switch strings.ToLower(name) {
@@ -21,19 +21,39 @@ func completionID(name string) int {
 		return 3
 	case "agent":
 		return 4
+	case "claude", "claude-code":
+		return 5
 	}
 	return 0
+}
+
+// A generic Agent hook can show a notice but has no known destination.
+func completionSlot(agent int) int {
+	switch agent {
+	case 1:
+		return 0
+	case 2:
+		return 1
+	case 3:
+		return 3
+	case 5:
+		return 4
+	default:
+		return -1
+	}
 }
 
 // The hook payload can contain conversation text. Read only completion markers
 // and send only a fixed agent label to the desktop notifier.
 func completed(id int, r io.Reader) bool {
 	var event struct {
-		Event        string `json:"hook_event_name"`
-		Notification string `json:"notification_type"`
-		StopReason   string `json:"terminationReason"`
-		Idle         bool   `json:"fullyIdle"`
-		Error        string `json:"error"`
+		Event        string     `json:"hook_event_name"`
+		Notification string     `json:"notification_type"`
+		StopReason   string     `json:"terminationReason"`
+		Idle         bool       `json:"fullyIdle"`
+		Error        string     `json:"error"`
+		Background   []struct{} `json:"background_tasks"`
+		Cron         []struct{} `json:"session_crons"`
 	}
 	if json.NewDecoder(io.LimitReader(r, 1<<20)).Decode(&event) != nil {
 		return false
@@ -45,6 +65,8 @@ func completed(id int, r io.Reader) bool {
 		return event.Idle && event.Error == "" && (event.StopReason == "NO_TOOL_CALL" || event.StopReason == "model_stop")
 	case 3:
 		return event.Notification == "turn_completed"
+	case 5:
+		return event.Event == "Stop" && len(event.Background) == 0 && len(event.Cron) == 0
 	}
 	return false
 }

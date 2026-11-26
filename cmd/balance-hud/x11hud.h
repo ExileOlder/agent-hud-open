@@ -16,7 +16,8 @@ void hud_settings_sync(Hud *,int,int,const char *);
 void hud_settings_show(Hud *);
 void hud_appearance(Hud *,int,double,int,int);
 
-void hud_notice(Hud *,const char *);
+void hud_notice(Hud *,const char *,const char *);
+int hud_post_completion(int);
 int hud_notice_active(Hud *);
 
 void hud_slots(Hud *,int);
