@@ -133,11 +133,14 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	var hideAt, peekAt time.Time
 	var peekProgress float64
 	var peekTarget bool
-	var tipRect rect
+	var tipRect, tipFrom rect
+	var tipSlideAt time.Time
+	var drawnTipWidth, drawnTipHeight int32
 	hide := func() {
 		hover = -1
 		hideAt, peekAt = time.Time{}, time.Time{}
 		peekTarget, peekProgress = false, 0
+		tipSlideAt = time.Time{}
 		if tip != 0 {
 			u("ShowWindow", tip, 0)
 			u("KillTimer", tip, 2)
@@ -195,11 +198,31 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		u("SetWindowPos", bar, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(bar)
 	}
+	tipGeometry := func(now time.Time) rect {
+		if tipSlideAt.IsZero() {
+			return tipRect
+		}
+		k := peekSwitchEase(now.Sub(tipSlideAt))
+		if k >= 1 {
+			tipSlideAt = time.Time{}
+			return tipRect
+		}
+		mix := func(a, b int32) int32 { return a + int32(math.Round(float64(b-a)*k)) }
+		x, y := mix(tipFrom.Left, tipRect.Left), mix(tipFrom.Top, tipRect.Top)
+		w, h := mix(tipFrom.Right-tipFrom.Left, tipRect.Right-tipRect.Left), tipRect.Bottom-tipRect.Top
+		return rect{x, y, x + w, y + h}
+	}
 	peekFrame := func(show bool) {
 		t := peekProgress
 		eased := t * t * (3 - 2*t)
 		delta := int32(math.Round(24 * (1 - eased)))
-		x, y := tipRect.Left, tipRect.Top
+		r := tipGeometry(time.Now())
+		x, y := r.Left, r.Top
+		w, h := r.Right-r.Left, r.Bottom-r.Top
+		if w != drawnTipWidth || h != drawnTipHeight {
+			drawnTipWidth, drawnTipHeight = w, h
+			shape(tip, w, h, peekHeight)
+		}
 		switch p.Edge {
 		case 0:
 			y -= delta
@@ -215,7 +238,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		if show {
 			flags |= 0x40
 		}
-		u("SetWindowPos", tip, 0, uintptr(x), uintptr(y), uintptr(tipRect.Right-tipRect.Left), uintptr(tipRect.Bottom-tipRect.Top), flags)
+		u("SetWindowPos", tip, 0, uintptr(x), uintptr(y), uintptr(w), uintptr(h), flags)
 	}
 	peekGoal := func(shown bool, now time.Time) {
 		if hover < 0 || peekTarget == shown {
@@ -239,7 +262,10 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			peekGoal(false, now)
 		}
 		if peekAt.IsZero() {
-			if hideAt.IsZero() {
+			if !tipSlideAt.IsZero() {
+				peekFrame(false)
+			}
+			if hideAt.IsZero() && tipSlideAt.IsZero() {
 				u("KillTimer", tip, 2)
 			}
 			return
@@ -325,10 +351,18 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		}
 		x = bound(x, area.Left, area.Right-w)
 		y = bound(y, area.Top, area.Bottom-h)
-		if w != tipRect.Right-tipRect.Left || h != tipRect.Bottom-tipRect.Top {
-			shape(tip, w, h, peekHeight)
+		target := rect{x, y, x + w, y + h}
+		if target != tipRect {
+			if !fresh && !p.ReduceMotion {
+				now := time.Now()
+				tipFrom = tipGeometry(now)
+				tipSlideAt = now
+				u("SetTimer", tip, 2, 16, 0)
+			} else {
+				tipSlideAt = time.Time{}
+			}
+			tipRect = target
 		}
-		tipRect = rect{x, y, x + w, y + h}
 		if fresh {
 			u("SetWindowPos", tip, ^uintptr(0), 0, 0, 0, 0, 0x1|0x2|0x10)
 			u("SetWindowPos", bar, ^uintptr(0), 0, 0, 0, 0, 0x1|0x2|0x10)

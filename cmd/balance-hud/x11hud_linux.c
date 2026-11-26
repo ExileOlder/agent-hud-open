@@ -27,6 +27,8 @@ struct Hud {
     Pixmap bitmap;
     int bw, bh, visible_slots;
     int tip_x, tip_y, tip_w, tip_h, motion;
+    int tip_from_x,tip_from_y,tip_from_w,tip_draw_w,tip_mapped;
+    long long tip_motion_at;
     int prefs_visible, page, prefs_count;
     PeekCell prefs_rows[8];
     char prefs_help[192];
@@ -169,6 +171,7 @@ static void place(Hud *h) {
 }
 static void hide_tip(Hud *h) {
     h->hover=-1;h->leave_at=0;h->peek_at=0;h->peek_progress=0;h->peek_target=0;
+    h->tip_mapped=0;h->tip_motion_at=0;
     XUnmapWindow(h->d,h->tip);
 }
 static int text_width(Hud *h, XftFont *font, const char *s) {
@@ -176,6 +179,29 @@ static int text_width(Hud *h, XftFont *font, const char *s) {
     XftTextExtentsUtf8(h->d,font,(const FcChar8*)s,strlen(s),&ext);
     return ext.xOff;
 }
+// HUDExpandedSurface.tsx keeps the Simple peek mounted and animates its
+// left/top/width with HUD_METRICS.ease for 0.4 s (hud-metrics.ts).
+static double peek_switch_ease(double elapsed){
+    double t=elapsed/400.0;
+    if(t<=0)return 0;
+    if(t>=1)return 1;
+    double lo=0,hi=1;
+    for(int i=0;i<12;i++){
+        double m=(lo+hi)*.5,u=1-m;
+        double x=3*u*u*m*.2+3*u*m*m*.2+m*m*m;
+        if(x<t)lo=m;else hi=m;
+    }
+    double m=(lo+hi)*.5,u=1-m;
+    return 3*u*u*m*.8+3*u*m*m+m*m*m;
+}
+static void tip_geometry(Hud *h,long long now,int *x,int *y,int *width) {
+    double t=h->tip_motion_at?peek_switch_ease(now-h->tip_motion_at):1;
+    *x=lround(h->tip_from_x+(h->tip_x-h->tip_from_x)*t);
+    *y=lround(h->tip_from_y+(h->tip_y-h->tip_from_y)*t);
+    *width=lround(h->tip_from_w+(h->tip_w-h->tip_from_w)*t);
+    if(t>=1)h->tip_motion_at=0;
+}
+static void paint_peek(Hud *h);
 // Keep one reversible progress value. Native compositing blends the whole
 // capsule, including its text and gear, while the window slides under the bar.
 static void peek_frame(Hud *h) {
@@ -186,7 +212,14 @@ static void peek_frame(Hud *h) {
     int dy=h->edge==2?delta:h->edge==0?-delta:0;
     unsigned long alpha=lround(0xffffffffUL*eased);
     XChangeProperty(h->d,h->tip,h->opacity,XA_CARDINAL,32,PropModeReplace,(unsigned char*)&alpha,1);
-    XMoveWindow(h->d,h->tip,h->tip_x+dx,h->tip_y+dy);
+    int x,y,w;
+    tip_geometry(h,millis(),&x,&y,&w);
+    XMoveResizeWindow(h->d,h->tip,x+dx,y+dy,w,h->tip_h);
+    if(h->tip_draw_w!=w){
+        h->tip_draw_w=w;
+        shape(h,h->tip,w,h->tip_h,peek_height/2,NULL);
+        paint_peek(h);
+    }
 }
 static void peek_goal(Hud *h,int shown,long long now) {
     if(h->hover<0 || h->peek_target==shown)return;
@@ -199,7 +232,10 @@ static void peek_goal(Hud *h,int shown,long long now) {
     h->peek_at=now;
 }
 static void peek_tick(Hud *h,long long now){
-    if(!h->peek_at)return;
+    if(!h->peek_at){
+        if(h->tip_motion_at)peek_frame(h);
+        return;
+    }
     int delta=now-h->peek_at;
     if(delta<=0)return;
     h->peek_at=now;
@@ -229,29 +265,44 @@ static void draw_tip(Hud *h) {
     if(h->edge==3){x=h->x+h->w;y=h->y+pad+h->hover*item+(item-height)/2;}
     x=clamp(x,h->sx,h->sx+h->sw-width);
     y=clamp(y,h->sy,h->sy+h->sh-height);
-    if(h->tip_w!=width||h->tip_h!=height){
-        XResizeWindow(h->d,h->tip,width,height);
-        shape(h,h->tip,width,height,peek_height/2,NULL);
-    }
-    h->tip_x=x;h->tip_y=y;h->tip_w=width;h->tip_h=height;
-    peek_frame(h);
-    XMapWindow(h->d,h->tip);
-    XWindowChanges z={.sibling=h->bar,.stack_mode=Below};
-    XConfigureWindow(h->d,h->tip,CWSibling|CWStackMode,&z);
-    XClearArea(h->d,h->tip,0,0,0,0,False);
-        int tx=peek_pad;
-        int baseline=(height+h->font->ascent-h->font->descent)/2;
-        XRectangle clip={0,0,(unsigned short)(width-gear),height};
-        XftDrawSetClipRectangles(h->tip_draw,0,0,&clip,1);
-        for(int i=0;i<n;i++){
-            PeekCell *c=&cells[i];
-            label(h,tx,baseline,c->label,h->font,&h->muted_text);
-            tx+=text_width(h,h->font,c->label)+peek_gap;
-            label(h,tx,baseline,c->value,h->heading,&h->tones[c->tone]);
-            tx+=text_width(h,h->heading,c->value)+peek_spacing;
+    if(h->tip_x!=x||h->tip_y!=y||h->tip_w!=width||!h->tip_mapped){
+        long long now=millis();
+        if(h->tip_mapped&&h->motion){
+            tip_geometry(h,now,&h->tip_from_x,&h->tip_from_y,&h->tip_from_w);
+            h->tip_motion_at=now;
+        }else{
+            h->tip_from_x=x;h->tip_from_y=y;h->tip_from_w=width;h->tip_motion_at=0;
         }
-        XftDrawSetClip(h->tip_draw,NULL);
-        paint_gear(h,width-gear/2-3,height/2);
+        h->tip_x=x;h->tip_y=y;h->tip_w=width;h->tip_h=height;
+    }
+    peek_frame(h);
+    if(!h->tip_mapped){
+        h->tip_mapped=1;
+        XMapWindow(h->d,h->tip);
+        XWindowChanges z={.sibling=h->bar,.stack_mode=Below};
+        XConfigureWindow(h->d,h->tip,CWSibling|CWStackMode,&z);
+    }
+    paint_peek(h);
+}
+static void paint_peek(Hud *h) {
+    if(h->hover<0)return;
+    int width=h->tip_draw_w,height=h->tip_h;
+    int n=h->counts[h->hover];
+    PeekCell *cells=h->cells[h->hover];
+    XClearArea(h->d,h->tip,0,0,0,0,False);
+    int tx=peek_pad;
+    int baseline=(height+h->font->ascent-h->font->descent)/2;
+    XRectangle clip={0,0,(unsigned short)(width-gear),height};
+    XftDrawSetClipRectangles(h->tip_draw,0,0,&clip,1);
+    for(int i=0;i<n;i++){
+        PeekCell *c=&cells[i];
+        label(h,tx,baseline,c->label,h->font,&h->muted_text);
+        tx+=text_width(h,h->font,c->label)+peek_gap;
+        label(h,tx,baseline,c->value,h->heading,&h->tones[c->tone]);
+        tx+=text_width(h,h->heading,c->value)+peek_spacing;
+    }
+    XftDrawSetClip(h->tip_draw,NULL);
+    paint_gear(h,width-gear/2-3,height/2);
 }
 static int slot_at(Hud *h,int x,int y){
     int p=(vertical(h)?y:x)-pad;
@@ -492,7 +543,7 @@ void hud_peek(Hud *h,int slot,int n) {
     if(h->hover==slot)draw_tip(h);
 }
 int hud_step(Hud *h,int timeout) {
-    if(h->peek_at&&timeout>16)timeout=16;
+    if((h->peek_at||h->tip_motion_at)&&timeout>16)timeout=16;
     if(h->leave_at){
         int wait=clamp(h->leave_at-millis(),0,timeout);
         if(wait<timeout)timeout=wait;
@@ -539,7 +590,7 @@ int hud_step(Hud *h,int timeout) {
         case Expose:
             // Expose can be queued by mapping the tooltip. Clear/draw without remapping.
             if(e.xexpose.count==0 && e.xexpose.window==h->bar)draw(h);
-            if(e.xexpose.count==0 && e.xexpose.window==h->tip)draw_tip(h);
+            if(e.xexpose.count==0 && e.xexpose.window==h->tip)paint_peek(h);
             break;
         case LeaveNotify:
             if(h->hover>=0)h->leave_at=millis()+(h->motion?120:0);
@@ -555,7 +606,7 @@ int hud_step(Hud *h,int timeout) {
             if(e.xbutton.window==h->tip){
                 if(e.xbutton.button==Button3){hide_tip(h);break;}
                 if(e.xbutton.button!=Button1)break;
-                if(e.xbutton.x>=h->tip_w-gear)return 4;
+                if(e.xbutton.x>=h->tip_draw_w-gear)return 4;
                 break;
             }
             if(e.xbutton.button==Button1){

@@ -154,6 +154,30 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	if !sawIntermediate {
 		t.Fatal("quota card skipped intermediate opacity")
 	}
+	// The original card stays mounted while changing y and width between
+	// two different slots. No second opacity transition should run.
+	var first, later rect
+	u("GetWindowRect", tip, uintptr(unsafe.Pointer(&first)))
+	onSecond := point{46, 50 + barItem}
+	if u("ClientToScreen", bar, uintptr(unsafe.Pointer(&onSecond))) == 0 ||
+		u("SetCursorPos", uintptr(onSecond.X), uintptr(onSecond.Y)) == 0 {
+		t.Fatal("cannot move to second mark")
+	}
+	post(bar, 0x200, 0, 46, 50+barItem)
+	crossed := false
+	wait("quota card did not reach the second mark", func() bool {
+		var alpha byte
+		u("GetWindowRect", tip, uintptr(unsafe.Pointer(&later)))
+		u("GetLayeredWindowAttributes", tip, 0, uintptr(unsafe.Pointer(&alpha)), 0)
+		distance := later.Top - first.Top
+		if distance > 0 && distance < barItem && alpha == 255 {
+			crossed = true
+		}
+		return distance == barItem && alpha == 255
+	})
+	if !crossed {
+		t.Fatal("card jumped instead of gliding between marks")
+	}
 	size := client(tip)
 	post(tip, 0x202, 0, size.Right-20, size.Bottom/2)
 	wait("gear did not open standalone preferences", func() bool { return visible(prefs) && !visible(tip) })
