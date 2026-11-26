@@ -168,14 +168,30 @@ def smoke(exe, home, display, log):
         pointer.move(badge.x + 42, badge.y + 42)
         panel = wait("the message panel did not open", lambda: window(" inbox"))
         assert panel.h == 192, panel
-        for _ in range(2):
-            pointer.click(panel.x + 130, panel.y + 121)
-            time.sleep(.05)
-        wait("double-click did not return to the Codex turn", route.exists)
-        assert route.read_text().splitlines() == [f"codex://threads/{thread}"]
-        pointer.click(panel.x + panel.w - 58, panel.y + 121)
-        wait("single-row dismissal did not remove the message and badge",
-             lambda: not window(" messages") and not store.exists())
+        def open_then_dismiss(panel, thread_id):
+            route.unlink(missing_ok=True)
+            for _ in range(2):
+                pointer.click(panel.x + 130, panel.y + 121)
+                time.sleep(.05)
+            wait("double-click did not return to the Codex turn", route.exists)
+            assert route.read_text().splitlines() == [f"codex://threads/{thread_id}"]
+            pointer.click(panel.x + panel.w - 58, panel.y + 121)
+            wait("single-row dismissal did not remove the message and badge",
+                 lambda: not window(" messages") and not store.exists())
+
+        open_then_dismiss(panel, thread)
+        finished = "78654321-1234-5678-abcd-123456789012"
+        stop_event = json.dumps({"hook_event_name": "Stop", "session_id": finished,
+                                 "last_assistant_message": "private-fixture"})
+        callback = sp.run([exe, "-completed", "codex", "-hook"], env=env, input=stop_event,
+                          text=True, capture_output=True, check=True, timeout=4)
+        assert not callback.stdout and not callback.stderr, callback
+        badge = wait("Codex Stop hook did not send a notice", lambda: window(" messages"))
+        assert json.loads(store.read_text()) == [{"agent": 1, "tone": 0, "thread": finished}]
+        pointer.move(badge.x + 42, badge.y + 42)
+        panel = wait("completion panel did not open", lambda: window(" inbox"))
+        open_then_dismiss(panel, finished)
+
         pointer.move(reopened.x + 46, reopened.y + 50)
         peek = wait("hover did not open the quota details", lambda: window(" quota details"))
         pointer.move(reopened.x + 46, reopened.y + 142)

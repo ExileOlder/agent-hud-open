@@ -95,7 +95,7 @@ uses the Harness’s `dsh://open` handler.
 
 For automatic reminders, add the indicated hooks for the clients you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
 
-- **[Codex](https://developers.openai.com/codex/hooks), only for versions without history integration:** add the handler under `hooks.Stop` in `${CODEX_HOME:-$HOME/.codex}/hooks.json`. Start a new session and approve the hook if prompted.
+- **[Codex](https://developers.openai.com/codex/hooks), only for versions without history integration:** add the handler under `hooks.Stop` in `${CODEX_HOME:-$HOME/.codex}/hooks.json`. Start a new session and approve the hook if prompted. Double-click the completion reminder to open its conversation when the hook supplies a session ID.
 
   ```json
   {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed codex -hook","timeout":5}]}]}}

@@ -697,11 +697,11 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 			case 2:
 				u("PostQuitMessage", 0)
 				return 0
-			case approvalMessage:
+			case approvalMessage, codexCompletionMessage:
 				now := time.Now()
-				mail.codexApproval(approvalFromMessage(wp, lp), now, !p.ReduceMotion)
+				mail.codexHookNotice(codexThreadFromMessage(wp, lp), msg == approvalMessage, now, !p.ReduceMotion)
 				renderMail(now)
-				return 0
+				return 1
 			case completionMessage:
 				now := time.Now()
 				work.hook(decodeHook(int(wp), uint32(lp)), &mail.mailInbox, now, !p.ReduceMotion)

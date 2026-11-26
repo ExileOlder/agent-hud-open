@@ -17,9 +17,9 @@ import (
 	"github.com/ExileOlder/agent-hud-open/internal/quota"
 )
 
-func TestApprovalMessageKeepsBothUUIDHalves(t *testing.T) {
+func TestCodexHookMessageKeepsBothUUIDHalves(t *testing.T) {
 	const first, second = 0x1198feedcafedead, 0xf0e1d2c3b4a59687
-	id := approvalFromMessage(uintptr(first), uintptr(second))
+	id := codexThreadFromMessage(uintptr(first), uintptr(second))
 	if got := id.route(); got != "addefeca-edfe-9811-8796-a5b4c3d2e1f0" {
 		t.Fatalf("received the wrong Codex UUID: %s", got)
 	}
@@ -237,7 +237,7 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	wait("dock inbox did not open independently", func() bool { return visible(inbox) })
 	post(inbox, 0x202, 0, client(inbox).Right-40, mailHeader+29)
 	wait("single-row dismiss did not close the empty badge and inbox", func() bool { return !visible(badge) && !visible(inbox) })
-	if err := notifyApproval(ctx, parseApprovalThread("cdefabcd-1234-5678-9abc-def012345678")); err != nil {
+	if err := notifyCodexHook(ctx, parseCodexHookThread("cdefabcd-1234-5678-9abc-def012345678"), true); err != nil {
 		t.Fatal(err)
 	}
 	wait("approval did not launch a paper flight", func() bool { return visible(paper) })
@@ -246,10 +246,19 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	wait("approval inbox did not open", func() bool { return visible(inbox) })
 	post(inbox, 0x202, 0, client(inbox).Right-40, mailHeader+29)
 	wait("approval could not be dismissed independently", func() bool { return !visible(badge) && !visible(inbox) })
-	if err := notifyHook(ctx, 5, 0); err != nil {
+	const finishedThread = "78654321-1234-5678-abcd-123456789012"
+	stop := strings.NewReader(`{"hook_event_name":"Stop","session_id":"` + finishedThread + `","last_assistant_message":"private"}`)
+	if err := runCompletion("codex", true, stop, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	wait("separate-process completion did not land", func() bool { return visible(badge) })
+	var saved []savedNotice
+	data, err = os.ReadFile(filepath.Join(base, "BalanceHUD", "inbox.json"))
+	if err != nil || json.Unmarshal(data, &saved) != nil ||
+		len(saved) != 1 || saved[0] != (savedNotice{Agent: 1, Thread: finishedThread}) ||
+		bytes.Contains(data, []byte("private")) {
+		t.Fatalf("routed native completion was not preserved exactly once: %s %v", data, err)
+	}
 	var desktop rect
 	if u("SystemParametersInfoW", 48, 0, uintptr(unsafe.Pointer(&desktop)), 0) == 0 {
 		t.Fatal("cannot read the native runner's work area")

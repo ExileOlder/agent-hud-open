@@ -68,13 +68,14 @@ const (
 	hookCompactEnd
 )
 const hookPhaseStep = 8
-const codexApprovalCode = 1 + hookPhaseStep*int(hookPermission)
+const codexCompletionCode = 1
+const codexApprovalCode = codexCompletionCode + hookPhaseStep*int(hookPermission)
 
 type hookEvent struct {
 	agent   int
 	phase   hookPhase
 	session uint32
-	thread  approvalThread
+	thread  codexHookThread
 }
 
 func (e hookEvent) code() int { return e.agent + hookPhaseStep*int(e.phase) }
@@ -119,11 +120,12 @@ func parseHook(id int, r io.Reader) hookEvent {
 	switch id {
 	case 1:
 		if event.Event == "PermissionRequest" {
-			return hookEvent{agent: id, phase: hookPermission, thread: parseApprovalThread(event.Session)}
+			return hookEvent{agent: id, phase: hookPermission, thread: parseCodexHookThread(event.Session)}
 		}
 		if event.Event != "Stop" {
 			return hookEvent{}
 		}
+		return hookEvent{agent: id, phase: hookComplete, thread: parseCodexHookThread(event.Session)}
 	case 2:
 		if !event.Idle || event.Error != "" || (event.StopReason != "NO_TOOL_CALL" && event.StopReason != "model_stop") {
 			return hookEvent{}
@@ -247,25 +249,25 @@ func runCompletion(name string, hook bool, input io.Reader, output io.Writer) er
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if event.agent == 1 && event.phase == hookPermission {
-		return notifyApproval(ctx, event.thread)
+	if event.agent == 1 && (event.phase == hookPermission || event.thread != (codexHookThread{})) {
+		return notifyCodexHook(ctx, event.thread, event.phase == hookPermission)
 	}
 	return notifyHook(ctx, event.code(), event.session)
 }
 
 // Only the UUID reaches the GUI. Tool names, approval reasons and payloads
 // stay in the client; an unfamiliar session ID opens Codex without a route.
-type approvalThread [16]byte
+type codexHookThread [16]byte
 
-func parseApprovalThread(id string) (thread approvalThread) {
+func parseCodexHookThread(id string) (thread codexHookThread) {
 	if codexThreadID.MatchString(id) {
 		_, _ = hex.Decode(thread[:], []byte(strings.ReplaceAll(id, "-", "")))
 	}
 	return
 }
 
-func (t approvalThread) route() string {
-	if t == (approvalThread{}) {
+func (t codexHookThread) route() string {
+	if t == (codexHookThread{}) {
 		return ""
 	}
 	id := hex.EncodeToString(t[:])
