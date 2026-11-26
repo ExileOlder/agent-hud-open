@@ -79,16 +79,16 @@ func main() {
 			}
 		}
 	}
-	fetch := func() []result {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fetch := func() <-chan result {
 		name := ""
 		if loadPlacement().ShowClaude {
 			name = *claude
 		}
-		return fetchQuotas(*codex, quotaMonitor, name, monitorPrefix...)
+		return fetchQuotas(ctx, *codex, quotaMonitor, name, monitorPrefix...)
 	}
 	if *desktop {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 		var notices <-chan codexnotice.Event
 		home := os.Getenv("CODEX_HOME")
 		if home == "" {
@@ -111,58 +111,49 @@ func main() {
 		}
 		return
 	}
-	if json.NewEncoder(os.Stdout).Encode(fetch()) != nil {
+	if json.NewEncoder(os.Stdout).Encode(collectQuotas(fetch())) != nil {
 		os.Exit(1)
 	}
 }
 
-func fetchQuotas(codex, agy, claude string, monitorPrefix ...string) []result {
-	results := make([]result, 0, 3)
-	collect := func(name string, f func(context.Context) ([]quota.Account, error)) {
-		ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
-		defer cancel()
-		rows, err := f(ctx)
-		row := result{Provider: name, Accounts: rows}
-		if err != nil {
-			row.Error = err.Error()
-		}
-		results = append(results, row)
-	}
-	collect("codex", func(ctx context.Context) ([]quota.Account, error) {
-		row, err := quota.Codex(ctx, codex)
-		if err != nil {
-			return nil, err
-		}
-		return []quota.Account{row}, nil
-	})
-	collect("antigravity", func(ctx context.Context) ([]quota.Account, error) {
-		return quota.Antigravity(ctx, agy, monitorPrefix...)
-	})
-	collect("mistral", func(ctx context.Context) ([]quota.Account, error) {
-		key := strings.TrimSpace(os.Getenv("MISTRAL_VIBE_API_KEY"))
-		if key == "" {
-			var err error
-			key, err = savedVibeKey(ctx)
+func fetchQuotas(parent context.Context, codex, agy, claude string, monitorPrefix ...string) <-chan result {
+	sources := []quotaSource{
+		{"codex", func(ctx context.Context) ([]quota.Account, error) {
+			row, err := quota.Codex(ctx, codex)
 			if err != nil {
 				return nil, err
 			}
-		}
-		row, err := quota.Mistral(ctx, key)
-		if err != nil {
-			return nil, err
-		}
-		return []quota.Account{row}, nil
-	})
+			return []quota.Account{row}, nil
+		}},
+		{"antigravity", func(ctx context.Context) ([]quota.Account, error) {
+			return quota.Antigravity(ctx, agy, monitorPrefix...)
+		}},
+		{"mistral", func(ctx context.Context) ([]quota.Account, error) {
+			key := strings.TrimSpace(os.Getenv("MISTRAL_VIBE_API_KEY"))
+			if key == "" {
+				var err error
+				key, err = savedVibeKey(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
+			row, err := quota.Mistral(ctx, key)
+			if err != nil {
+				return nil, err
+			}
+			return []quota.Account{row}, nil
+		}},
+	}
 	if claude != "" {
-		collect("claude", func(ctx context.Context) ([]quota.Account, error) {
+		sources = append(sources, quotaSource{"claude", func(ctx context.Context) ([]quota.Account, error) {
 			row, err := quota.Claude(ctx, claude)
 			if err != nil {
 				return nil, err
 			}
 			return []quota.Account{row}, nil
-		})
+		}})
 	}
-	return results
+	return refreshQuotas(parent, sources)
 }
 
 func monitorExecutable() string {

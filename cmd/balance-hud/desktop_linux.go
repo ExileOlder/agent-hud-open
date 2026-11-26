@@ -39,7 +39,7 @@ func notifyApproval(_ context.Context, thread approvalThread) error {
 	return nil
 }
 
-func runDesktop(fetch func() []result, clients ...settingsTools) error {
+func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	var tools settingsTools
 	if len(clients) != 0 {
 		tools = clients[0]
@@ -118,15 +118,14 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		C.hud_bitmap(h, C.int(frame.Bounds().Dx()), C.int(frame.Bounds().Dy()),
 			(*C.uchar)(unsafe.Pointer(&frame.Pix[0])), &regions[0], C.int(n))
 	}
-	ready := make(chan []result, 1)
-	inFlight, pending := false, false
+	var ready <-chan result
+	pending := false
 	refresh := func() {
-		if inFlight {
+		if ready != nil {
 			pending = true
 			return
 		}
-		inFlight = true
-		go func() { ready <- fetch() }()
+		ready = fetch()
 	}
 	refresh()
 	mail := mailInbox{profiles: antigravityProfileKeys()}
@@ -251,18 +250,21 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			drawSettings()
 		}
 		select {
-		case incoming := <-ready:
-			inFlight = false
-			if pending {
-				pending = false
-				refresh()
+		case incoming, ok := <-ready:
+			if !ok {
+				ready = nil
+				if pending {
+					pending = false
+					refresh()
+				} else if panel.message == "Refreshing balances…" {
+					panel.message = "Balances refreshed."
+					drawSettings()
+				}
+				break
 			}
-			panel.raw = incoming
-			rows = updateView(rows, settingsResults(incoming, p))
+			panel.raw = mergeQuota(panel.raw, incoming)
+			rows = updateView(rows, settingsResults(panel.raw, p))
 			set(rows)
-			if panel.message == "Refreshing balances…" {
-				panel.message = "Balances refreshed."
-			}
 			drawSettings()
 			dirty = true
 		case <-timer.C:

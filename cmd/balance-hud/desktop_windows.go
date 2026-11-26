@@ -93,7 +93,7 @@ func paintGear(dc uintptr, x, y int32, background uintptr) {
 	g("SelectObject", dc, pen)
 }
 
-func runDesktop(fetch func() []result, clients ...settingsTools) error {
+func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	var tools settingsTools
 	if len(clients) != 0 {
 		tools = clients[0]
@@ -119,16 +119,15 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	var initial point
 	var dragOrigin rect
 	var downAt time.Time
-	ready := make(chan []result, 1)
-	busy, pending := false, false
+	var ready <-chan result
+	pending := false
 	next := time.Time{}
 	refresh := func() {
-		if busy {
+		if ready != nil {
 			pending = true
 			return
 		}
-		busy = true
-		go func() { ready <- fetch() }()
+		ready = fetch()
 	}
 	var hideAt, peekAt time.Time
 	var peekProgress float64
@@ -754,17 +753,20 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 					}
 				}
 				select {
-				case incoming := <-ready:
-					busy = false
-					if pending {
-						pending = false
-						refresh()
+				case incoming, ok := <-ready:
+					if !ok {
+						ready = nil
+						if pending {
+							pending = false
+							refresh()
+						} else if panel.message == "Refreshing balances…" {
+							panel.message = "Balances refreshed."
+							invalidate(prefs)
+						}
+						break
 					}
-					panel.raw = incoming
-					rows = updateView(rows, settingsResults(incoming, p))
-					if panel.message == "Refreshing balances…" {
-						panel.message = "Balances refreshed."
-					}
+					panel.raw = mergeQuota(panel.raw, incoming)
+					rows = updateView(rows, settingsResults(panel.raw, p))
 					invalidate(bar)
 					invalidate(prefs)
 					if hover >= 0 {

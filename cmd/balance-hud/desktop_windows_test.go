@@ -36,8 +36,9 @@ func TestWindowsNativeSmoke(t *testing.T) {
 				events <- codexnotice.Event{Thread: "12345678-1234-1234-1234-123456789012", ID: "question:fixture", Question: true}
 			}
 		}()
-		fetch := func() []result {
-			return []result{
+		fetch := func() <-chan result {
+			updates := make(chan result, 4)
+			for _, reading := range []result{
 				{Provider: "codex", Accounts: []quota.Account{{Label: "Codex", Windows: []quota.Window{{Name: "7d", Remaining: 82}}}}},
 				{Provider: "antigravity", Accounts: []quota.Account{
 					{Label: "one@example.test", Windows: []quota.Window{{Name: "7d", Remaining: 64}}},
@@ -45,7 +46,11 @@ func TestWindowsNativeSmoke(t *testing.T) {
 				}},
 				{Provider: "mistral", Accounts: []quota.Account{{Label: "Mistral Vibe", Balance: "137.14 / 150.00 USD", Windows: []quota.Window{{Name: "Subscription", Remaining: 91.426}}}}},
 				{Provider: "claude", Accounts: []quota.Account{{Label: "Claude Code", Windows: []quota.Window{{Name: "5h", Remaining: 63}}}}},
+			} {
+				updates <- reading
 			}
+			close(updates)
+			return updates
 		}
 		if err := runDesktop(fetch, settingsTools{notices: events}); err != nil {
 			t.Fatal(err)
