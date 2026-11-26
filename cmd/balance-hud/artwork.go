@@ -105,6 +105,7 @@ type barPainter struct {
 	geometry [3]int
 	vertical bool
 	marks    [5]paintedMark
+	damage   [5]image.Rectangle // bitmap regions modified by the latest paint
 	avatars  avatarCache
 }
 
@@ -126,6 +127,7 @@ func (b *barPainter) paint(rows []row, p placement, frames markFrames) *image.RG
 		draw.Draw(b.bitmap, b.bitmap.Bounds(), dockBGRA, image.Point{}, draw.Src)
 	}
 	dst := b.bitmap
+	b.damage = [5]image.Rectangle{}
 	now := time.Now()
 	for i, r := range rows[:p.slotCount()] {
 		mark := paintedMark{r.Percent, r.quotaTone(), frames[i]}
@@ -140,6 +142,7 @@ func (b *barPainter) paint(rows []row, p placement, frames markFrames) *image.RG
 		cx, cy := left+barItem/2, top+barItem/2
 		const patchRadius = 33
 		patch := image.Rect(cx-patchRadius, cy-patchRadius, cx+patchRadius+1, cy+patchRadius+1)
+		b.damage[i] = patch
 		draw.Draw(dst, patch, dockRGBA, image.Point{}, draw.Src)
 		q := quotaInks[mark.tone]
 

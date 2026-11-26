@@ -97,9 +97,26 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	lastHover := -1
 	var previousFrames markFrames
 	animating, dirty := false, true
-	paint := func(frames markFrames) {
+	var regions [5 * 4]C.int
+	paint := func(frames markFrames, full bool) {
 		frame := painter.paint(rows, p, frames)
-		C.hud_bitmap(h, C.int(frame.Bounds().Dx()), C.int(frame.Bounds().Dy()), (*C.uchar)(unsafe.Pointer(&frame.Pix[0])))
+		n := 0
+		if !full {
+			for _, r := range painter.damage {
+				if r.Empty() {
+					continue
+				}
+				at := n * 4
+				regions[at], regions[at+1] = C.int(r.Min.X), C.int(r.Min.Y)
+				regions[at+2], regions[at+3] = C.int(r.Dx()), C.int(r.Dy())
+				n++
+			}
+			if n == 0 {
+				return
+			}
+		}
+		C.hud_bitmap(h, C.int(frame.Bounds().Dx()), C.int(frame.Bounds().Dy()),
+			(*C.uchar)(unsafe.Pointer(&frame.Pix[0])), &regions[0], C.int(n))
 	}
 	ready := make(chan []result, 1)
 	inFlight, pending := false, false
@@ -297,7 +314,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		frames, active = mail.cueFrames(now, p, rows, frames, active)
 		animating = active
 		if dirty || frames != previousFrames {
-			paint(frames)
+			paint(frames, dirty)
 			previousFrames, dirty = frames, false
 		}
 	}

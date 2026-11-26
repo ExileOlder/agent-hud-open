@@ -130,3 +130,29 @@ func TestAllMarksLeaveHoverFromDisplayedPose(t *testing.T) {
 		}
 	}
 }
+
+func TestDockFrameDamageReportsOnlyChangedMarkPatches(t *testing.T) {
+	for _, edge := range []int{0, 3} {
+		var painter barPainter
+		rows := view(nil)
+		p := placement{Edge: edge, Numbers: true}
+		painter.paint(rows, p, markFrames{})
+		changed := markFrames{workBase + 8, 0, toolBase + 1}
+		frame := painter.paint(rows, p, changed)
+		for i, rect := range painter.damage {
+			if i != 0 && i != 2 {
+				if !rect.Empty() {
+					t.Fatalf("stationary mark %d was damaged at edge %d", i, edge)
+				}
+				continue
+			}
+			if rect.Empty() || rect.Dx() != 67 || rect.Dy() != 67 || !rect.In(frame.Bounds()) {
+				t.Fatalf("edge %d mark %d: unexpected patch %v", edge, i, rect)
+			}
+		}
+		painter.paint(rows, p, changed)
+		if painter.damage != [5]image.Rectangle{} {
+			t.Fatalf("unchanged frame damaged the bar at edge %d", edge)
+		}
+	}
+}

@@ -152,34 +152,42 @@ void hud_number(Hud *h,int i,const char *number,int tone){
     snprintf(h->figures[i],sizeof(h->figures[i]),"%s",number);
     h->figure_tone[i]=clamp(tone,0,4);
 }
-void hud_bitmap(Hud *h,int w,int height,const unsigned char *pixels){
+void hud_bitmap(Hud *h,int w,int height,const unsigned char *pixels,const int *regions,int n){
     if(w!=h->w||height!=h->height)return;
     if(!h->bitmap||h->bw!=w||h->bh!=height){
         if(h->bitmap)XFreePixmap(h->d,h->bitmap);
         h->bitmap=XCreatePixmap(h->d,h->bar,w,height,DefaultDepth(h->d,DefaultScreen(h->d)));
         h->bw=w;h->bh=height;
         XftDrawChange(h->bar_draw,h->bitmap);
+        n=0;
     }
     XImage *img=XCreateImage(h->d,DefaultVisual(h->d,DefaultScreen(h->d)),
         DefaultDepth(h->d,DefaultScreen(h->d)),ZPixmap,0,(char *)pixels,w,height,32,w*4);
     if(!img)return;
     if(img->bits_per_pixel==32 && img->byte_order==LSBFirst && img->red_mask==0xff0000 &&
        img->green_mask==0xff00 && img->blue_mask==0xff){
-        XPutImage(h->d,h->bitmap,h->gc,img,0,0,0,0,w,height);
+        if(!n)XPutImage(h->d,h->bitmap,h->gc,img,0,0,0,0,w,height);
+        else for(int i=0;i<n;i++){
+            const int *r=regions+4*i;
+            XPutImage(h->d,h->bitmap,h->gc,img,r[0],r[1],r[0],r[1],r[2],r[3]);
+            if(!h->outlined)
+                XCopyArea(h->d,h->bitmap,h->bar,h->gc,r[0],r[1],r[2],r[3],r[0],r[1]);
+        }
     }else{
         img->data=NULL;
         XDestroyImage(img);
         return;
     }
     img->data=NULL;XDestroyImage(img);
-    if(h->numbers)for(int i=0;i<h->visible_slots;i++){
+    if(!n&&h->numbers)for(int i=0;i<h->visible_slots;i++){
         int x=(vertical(h)?0:pad+i*step(h))+item-2;
         int y=pad+(vertical(h)?i*item:0)+item/2+
             (h->prefs_font->ascent-h->prefs_font->descent)/2;
         XftDrawStringUtf8(h->bar_draw,&h->number_ink[h->figure_tone[i]],h->prefs_font,
             x,y,(const FcChar8*)h->figures[i],strlen(h->figures[i]));
     }
-    draw(h);XFlush(h->d);
+    if(!n||h->outlined)draw(h);
+    XFlush(h->d);
 }
 static void place(Hud *h) {
     int v = vertical(h);

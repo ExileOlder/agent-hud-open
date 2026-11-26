@@ -9,7 +9,8 @@ double hud_offset(Hud *h);
 int hud_numbers(Hud *h);
 
 void hud_number(Hud *,int,const char *,int);
-void hud_bitmap(Hud *,int,int,const unsigned char *);
+// n == 0 uploads the entire dock, including updated labels.
+void hud_bitmap(Hud *,int,int,const unsigned char *,const int *,int);
 int hud_hover(Hud *);
 
 void hud_settings_row(Hud *,int,const char *,const char *);
