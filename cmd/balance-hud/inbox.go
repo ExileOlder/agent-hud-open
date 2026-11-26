@@ -55,6 +55,7 @@ func (item mailItem) summary() string {
 type mailInbox struct {
 	items, queue []mailItem
 	statePath    string
+	path         flightPath
 	started      time.Time
 	open         bool
 	revision     int
@@ -337,28 +338,6 @@ func inboxPanel(tail, bar, screen mailRect, edge, count int) mailRect {
 	r.x = max(screen.x, min(r.x, screen.x+screen.w-r.w))
 	r.y = max(screen.y, min(r.y, screen.y+screen.h-r.h))
 	return r
-}
-
-// Like the original dock route, bow into the screen, rotate the plane to
-// follow the tangent, then settle it into the message tail.
-func inboxFlight(bar, tail, screen mailRect, edge, source, step int, norm float64) (mailPoint, float64) {
-	src := mailPoint{float64(bar.x + barPadding + source*step + barItem/2), float64(bar.y + bar.h/2)}
-	if edge%2 == 1 {
-		src = mailPoint{float64(bar.x + barItem/2), float64(bar.y + barPadding + source*barItem + barItem/2)}
-	}
-	dst := mailPoint{float64(tail.x + tail.w/2), float64(tail.y + tail.h/2)}
-	dx, dy := dst.x-src.x, dst.y-src.y
-	norm = clamp01(norm)
-	a := norm * norm * (3 - 2*norm)
-	normals := [...]mailPoint{{0, 1}, {-1, 0}, {0, -1}, {1, 0}}
-	n := normals[edge]
-	bow := min(130, max(45, math.Hypot(dx, dy)*.34))
-	sway := math.Sin(math.Pi*a) * bow
-	pos := mailPoint{src.x + dx*a + n.x*sway, src.y + dy*a + n.y*sway}
-	slope := math.Pi * math.Cos(math.Pi*a) * bow
-	pos.x = max(float64(screen.x+18), min(pos.x, float64(screen.x+screen.w-18)))
-	pos.y = max(float64(screen.y+18), min(pos.y, float64(screen.y+screen.h-18)))
-	return pos, math.Atan2(dy+n.y*slope, dx+n.x*slope)
 }
 
 const paperSize = 44

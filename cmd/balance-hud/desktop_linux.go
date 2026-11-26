@@ -168,7 +168,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 				source = p.slotCount() / 2
 			}
 			_, _, step := barGeometry(p)
-			pt, angle := inboxFlight(bar, tail, screen, p.Edge, source, step, float64(now.Sub(mail.started))/float64(mailFlight))
+			pt, angle := mail.flightAt(now, flightGeometry{bar, tail, screen, p.Edge, source, step})
 			var poly [12]C.int
 			for i, q := range paperPoints(angle) {
 				poly[2*i], poly[2*i+1] = C.int(q.x+.5), C.int(q.y+.5)

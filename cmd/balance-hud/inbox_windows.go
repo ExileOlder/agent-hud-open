@@ -195,7 +195,7 @@ func (m *winMail) draw(now time.Time, frame, area rect, p placement, rows []row,
 		source = p.slotCount() / 2
 	}
 	_, _, step := barGeometry(p)
-	at, angle := inboxFlight(bar, tail, screen, p.Edge, source, step, float64(now.Sub(m.started))/float64(mailFlight))
+	at, angle := m.flightAt(now, flightGeometry{bar, tail, screen, p.Edge, source, step})
 	for i, q := range paperPoints(angle) {
 		m.poly[i] = point{int32(math.Round(q.x)), int32(math.Round(q.y))}
 	}
