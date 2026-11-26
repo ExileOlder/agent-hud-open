@@ -78,17 +78,17 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 		const base, rowBG, hotBG, button, rule = 0x101418, 0x191f25, 0x222c36, 0x2c3947, 0x26313b
 		fillMailCard(dc, 0, 0, width, height, 22, base)
 		g("SelectObject", dc, mailTitle)
-		write(dc, 27, 10, "消息", 0xf6f4f2)
+		write(dc, 27, 16, "消息", 0xf6f4f2)
 		g("SelectObject", dc, mailSmall)
 		total := strconv.Itoa(len(m.items))
 		fillMailCard(dc, 121, 17, 55, 40, 11, button)
-		write(dc, 148-measure(dc, total)/2, 18, total, 0xf6f4f2)
+		write(dc, 148-measure(dc, total)/2, 22, total, 0xf6f4f2)
 		clearBG := uintptr(rowBG)
 		if m.hot == 92 {
 			clearBG = hotBG
 		}
 		fillMailCard(dc, width-198, 14, 176, 45, 11, clearBG)
-		write(dc, width-110-measure(dc, "全部清空")/2, 18, "全部清空", 0xf6f4f2)
+		write(dc, width-110-measure(dc, "全部清空")/2, 22, "全部清空", 0xf6f4f2)
 		drawMailStroke(dc, rule, 1, [4]int32{22, 66, width - 23, 66})
 		tiles := [3]uintptr{0x15362e, 0x1b314a, 0x3b2c24}
 		accents := [3]uintptr{0x72dcb1, 0x92baff, 0xf0be85}
@@ -98,25 +98,25 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 			if m.hot == mailOpenBase+i || m.hot == mailDismissBase+i {
 				color = hotBG
 			}
-			fillMailCard(dc, 16, y, width-32, mailRow-8, 15, color)
+			fillMailCard(dc, 16, y, width-32, mailRow-12, 15, color)
 			tone := item.tone()
-			fillMailCard(dc, 30, y+20, 52, 52, 13, tiles[tone])
+			fillMailCard(dc, 30, y+28, 52, 52, 13, tiles[tone])
 			switch tone {
 			case 0:
-				drawMailStroke(dc, accents[tone], 3, [4]int32{46, y + 47, 53, y + 54}, [4]int32{53, y + 54, 67, y + 37})
+				drawMailStroke(dc, accents[tone], 3, [4]int32{46, y + 55, 53, y + 62}, [4]int32{53, y + 62, 67, y + 45})
 			case 1:
-				write(dc, 56-measure(dc, "?")/2, y+28, "?", mailRGB(accents[tone]))
+				write(dc, 56-measure(dc, "?")/2, y+40, "?", mailRGB(accents[tone]))
 			case 2:
-				drawMailStroke(dc, accents[tone], 3, [4]int32{56, y + 34, 56, y + 48}, [4]int32{56, y + 53, 56, y + 56})
+				drawMailStroke(dc, accents[tone], 3, [4]int32{56, y + 42, 56, y + 56}, [4]int32{56, y + 61, 56, y + 64})
 			}
 			g("SelectObject", dc, mailTitle)
-			write(dc, 106, y+3, agentNames[item.agent], 0xf6f4f2)
+			write(dc, 106, y+10, agentNames[item.agent], 0xf6f4f2)
 			g("SelectObject", dc, mailSmall)
-			write(dc, 106, y+46, item.summary(), mailRGB(accents[tone]))
-			x, cy := width-58, y+48
+			write(dc, 106, y+63, item.summary(), mailRGB(accents[tone]))
+			x, cy := width-58, y+55
 			closeInk := uintptr(0x74787b)
 			if m.hot == mailDismissBase+i {
-				fillMailCard(dc, width-88, y+20, 59, 58, 12, button)
+				fillMailCard(dc, width-88, y+26, 59, 58, 12, button)
 				closeInk = 0xe7eef5
 			}
 			drawMailStroke(dc, closeInk, 3, [4]int32{x - 7, cy - 7, x + 8, cy + 8}, [4]int32{x - 7, cy + 7, x + 8, cy - 8})

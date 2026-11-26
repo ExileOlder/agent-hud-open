@@ -435,7 +435,7 @@ void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
 }
 
 
-enum { mail_size=84, mail_header=72, mail_row=100, paper_size=44 };
+enum { mail_size=84, mail_header=72, mail_row=120, paper_size=44 };
 int hud_drag_active(Hud *h) {return h->pressed&&h->moved;}
 void hud_mail_bounds(Hud *h,int *rects) {
     int values[]={h->x,h->y,h->w,h->height,h->sx,h->sy,h->sw,h->sh};
@@ -476,8 +476,8 @@ static int mail_target(Hud*h,int x,int y) {
     if(x>=width-198&&x<width-22&&y>=14&&y<59)return 92;
     if(x<16||x>=width-16||y<mail_header)return 0;
     int row=(y-mail_header)/mail_row,inside=(y-mail_header)%mail_row;
-    if(row>=h->mail_displayed||inside>=mail_row-8)return 0;
-    if(x>=width-88&&x<width-29&&inside>=20&&inside<78)return 320+row;
+    if(row>=h->mail_displayed||inside>=mail_row-12)return 0;
+    if(x>=width-88&&x<width-29&&inside>=26&&inside<84)return 320+row;
     return 300+row;
 }
 static void draw_mail_panel(Hud *h) {
@@ -485,12 +485,12 @@ static void draw_mail_panel(Hud *h) {
     int width=h->mail_panel_rect[2],height=h->mail_panel_rect[3];
     XSetForeground(h->d,h->gc,h->mail_fill);
     XFillRectangle(h->d,h->mail_panel,h->gc,0,0,width,height);
-    mail_text(h->mail_draw,&h->text_color,h->mail_header_font,27,51,"消息");
+    mail_text(h->mail_draw,&h->text_color,h->mail_header_font,27,48,"消息");
     char count_text[8];snprintf(count_text,sizeof(count_text),"%d",h->mail_count);
     mail_rounded(h,121,17,55,40,11,h->mail_button);
-    mail_text(h->mail_draw,&h->text_color,h->mail_small,148-text_width(h,h->mail_small,count_text)/2,47,count_text);
+    mail_text(h->mail_draw,&h->text_color,h->mail_small,148-text_width(h,h->mail_small,count_text)/2,45,count_text);
     mail_rounded(h,width-198,14,176,45,11,h->mail_hot==92?h->mail_hot_bg:h->mail_row_bg);
-    mail_text(h->mail_draw,&h->text_color,h->mail_small,width-110-text_width(h,h->mail_small,"全部清空")/2,47,"全部清空");
+    mail_text(h->mail_draw,&h->text_color,h->mail_small,width-110-text_width(h,h->mail_small,"全部清空")/2,45,"全部清空");
     XSetForeground(h->d,h->gc,h->mail_rule);
     XDrawLine(h->d,h->mail_panel,h->gc,22,66,width-23,66);
     for(int i=0;i<h->mail_displayed;i++){
@@ -498,23 +498,23 @@ static void draw_mail_panel(Hud *h) {
         PeekCell*row=&h->mail_rows[i];
         int tone=clamp(row->tone,0,2);
         int hover=h->mail_hot==300+i||h->mail_hot==320+i;
-        mail_rounded(h,16,y,width-32,mail_row-8,15,hover?h->mail_hot_bg:h->mail_row_bg);
-        mail_rounded(h,30,y+20,52,52,13,h->mail_tile[tone]);
+        mail_rounded(h,16,y,width-32,mail_row-12,15,hover?h->mail_hot_bg:h->mail_row_bg);
+        mail_rounded(h,30,y+28,52,52,13,h->mail_tile[tone]);
         XSetForeground(h->d,h->gc,h->mail_accent[tone]);
         XSetLineAttributes(h->d,h->gc,3,LineSolid,CapRound,JoinRound);
         if(!tone){
-            XPoint mark[]={{46,y+47},{53,y+54},{67,y+37}};
+            XPoint mark[]={{46,y+55},{53,y+62},{67,y+45}};
             XDrawLines(h->d,h->mail_panel,h->gc,mark,3,CoordModeOrigin);
         } else if(tone==2){
-            XDrawLine(h->d,h->mail_panel,h->gc,56,y+34,56,y+47);
-            XDrawPoint(h->d,h->mail_panel,h->gc,56,y+54);
+            XDrawLine(h->d,h->mail_panel,h->gc,56,y+42,56,y+55);
+            XDrawPoint(h->d,h->mail_panel,h->gc,56,y+62);
         }
         XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
-        if(tone==1)mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,56-text_width(h,h->mail_small,"?")/2,y+57,"?");
-        mail_text(h->mail_draw,&h->text_color,h->mail_title,106,y+41,row->label);
-        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,106,y+75,row->value);
-        int close_x=width-58,close_y=y+48;
-        if(h->mail_hot==320+i)mail_rounded(h,width-88,y+20,59,58,12,h->mail_button);
+        if(tone==1)mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,56-text_width(h,h->mail_small,"?")/2,y+62,"?");
+        mail_text(h->mail_draw,&h->text_color,h->mail_title,106,y+39,row->label);
+        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,106,y+86,row->value);
+        int close_x=width-58,close_y=y+55;
+        if(h->mail_hot==320+i)mail_rounded(h,width-88,y+26,59,58,12,h->mail_button);
         XSetForeground(h->d,h->gc,h->mail_hot==320+i?h->fg:h->mail_ring);
         XSetLineAttributes(h->d,h->gc,3,LineSolid,CapRound,JoinRound);
         XDrawLine(h->d,h->mail_panel,h->gc,close_x-7,close_y-7,close_x+7,close_y+7);
@@ -640,9 +640,9 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     Colormap cmap=DefaultColormap(d,screen);
     h->font=XftFontOpenName(d,screen,"sans:pixelsize=21");
     h->notice_font=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=19");
-    h->mail_small=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=30");
-    h->mail_header_font=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=40");
-    h->mail_title=XftFontOpenName(d,screen,"sans:weight=demibold:pixelsize=40");
+    h->mail_small=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=24");
+    h->mail_header_font=XftFontOpenName(d,screen,"sans:lang=zh-cn:pixelsize=32");
+    h->mail_title=XftFontOpenName(d,screen,"sans:weight=demibold:pixelsize=32");
     h->mail_fill=color(h,"#101418",h->bg);
     h->mail_row_bg=color(h,"#191f25",h->bg);
     h->mail_hot_bg=color(h,"#222c36",h->bg);

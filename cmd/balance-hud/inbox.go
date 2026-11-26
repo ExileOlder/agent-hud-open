@@ -16,7 +16,7 @@ const (
 	mailGap         = 9
 	mailWidth       = 608
 	mailHeader      = 72
-	mailRow         = 100
+	mailRow         = 120
 	mailVisible     = 6
 	mailLimit       = 32
 	mailFlight      = 620 * time.Millisecond
@@ -253,10 +253,10 @@ func mailTarget(x, y, width, rows int) int {
 		return 0
 	}
 	row, inside := (y-mailHeader)/mailRow, (y-mailHeader)%mailRow
-	if row >= rows || inside >= mailRow-8 {
+	if row >= rows || inside >= mailRow-12 {
 		return 0
 	}
-	if x >= width-88 && x < width-29 && inside >= 20 && inside < 78 {
+	if x >= width-88 && x < width-29 && inside >= 26 && inside < 84 {
 		return mailDismissBase + row
 	}
 	return mailOpenBase + row

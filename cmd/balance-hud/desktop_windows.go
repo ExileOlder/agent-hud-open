@@ -170,7 +170,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	defer g("DeleteObject", valueFont)
 	figureFont := font(400, 16)
 	defer g("DeleteObject", figureFont)
-	mailSmall, mailTitle := font(400, 30), font(600, 40)
+	mailSmall, mailTitle := font(400, 24), font(600, 32)
 	defer g("DeleteObject", mailSmall)
 	defer g("DeleteObject", mailTitle)
 	prefsFont := font(400, 15)
