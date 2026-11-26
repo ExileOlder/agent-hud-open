@@ -6,21 +6,22 @@ import { renderBot } from "./bots/bot-renderer";
 import { botState } from "./bots/bot-state";
 import { SplitMix } from "./bots/bot-pace";
 
-declare const MARKS: string[];
+const marks = document.images;
 const cell = 80, side = 54, count = 40, columns = 8;
 const idleFPS = 16, idleCount = 88;
-const idle = new URLSearchParams(location.search).has("idle");
+const query = new URLSearchParams(location.search);
+const idle = query.has("idle");
+const keys = query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
 const frames = idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
-sheet.height = 3 * frames / columns * cell;
+sheet.height = keys.length * frames / columns * cell;
 const ctx = sheet.getContext("2d")!;
 
 async function record() {
-  for (const [slot, key] of ["openai", "antigravity", "deepseek"].entries()) {
-    const image = new Image();
-    image.src = MARKS[slot];
-    await image.decode();
+  for (const [slot, key] of keys.entries()) {
+    const image = marks[key === "claude" ? 3 : slot];
+    if (!image.naturalWidth) throw new Error("Unreadable asset for " + key);
     const source = document.createElement("canvas");
     source.width = source.height = 256;
     const ink = source.getContext("2d")!;
@@ -69,4 +70,6 @@ async function record() {
   }
   document.body.textContent = sheet.toDataURL("image/png");
 }
-record().catch(error => { document.body.textContent = String(error.stack ?? error); });
+window.addEventListener("load", () => {
+  record().catch(error => { document.body.textContent = String(error.stack ?? error); });
+});

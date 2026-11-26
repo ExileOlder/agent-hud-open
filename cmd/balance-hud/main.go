@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -24,6 +25,7 @@ type result struct {
 func main() {
 	codex := flag.String("codex", "codex", "Codex CLI executable")
 	agy := flag.String("antigravity", monitorExecutable(), "authorized Antigravity monitor executable")
+	claude := flag.String("claude", claudeExecutable(), "Claude Code CLI executable")
 	desktop := flag.Bool("desktop", true, "open native quota HUD")
 	setup := flag.Bool("setup-mistral", false, "save a Mistral Vibe key in the Linux credential store")
 	completion := flag.String("completed", "", "show completion reminder (codex, antigravity, mistral, agent)")
@@ -56,7 +58,13 @@ func main() {
 			}
 		}
 	}
-	fetch := func() []result { return fetchQuotas(*codex, *agy) }
+	fetch := func() []result {
+		name := ""
+		if loadPlacement().ShowClaude {
+			name = *claude
+		}
+		return fetchQuotas(*codex, *agy, name)
+	}
 	if *desktop {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -70,7 +78,7 @@ func main() {
 		if home != "" {
 			notices = codexnotice.Watch(ctx, home)
 		}
-		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, notices: notices}); err != nil {
+		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, claude: *claude, notices: notices}); err != nil {
 			println(err.Error())
 			os.Exit(1)
 		}
@@ -81,7 +89,7 @@ func main() {
 	}
 }
 
-func fetchQuotas(codex, agy string) []result {
+func fetchQuotas(codex, agy, claude string) []result {
 	results := make([]result, 0, 3)
 	collect := func(name string, f func(context.Context) ([]quota.Account, error)) {
 		ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
@@ -116,6 +124,15 @@ func fetchQuotas(codex, agy string) []result {
 		}
 		return []quota.Account{row}, nil
 	})
+	if claude != "" {
+		collect("claude", func(ctx context.Context) ([]quota.Account, error) {
+			row, err := quota.Claude(ctx, claude)
+			if err != nil {
+				return nil, err
+			}
+			return []quota.Account{row}, nil
+		})
+	}
 	return results
 }
 
@@ -131,4 +148,17 @@ func monitorExecutable() string {
 		}
 	}
 	return name
+}
+
+func claudeExecutable() string {
+	if exe, err := exec.LookPath("claude"); err == nil {
+		return exe
+	}
+	if home, err := os.UserHomeDir(); runtime.GOOS == "linux" && err == nil {
+		local := filepath.Join(home, "AI", "Claude", "App", "claude")
+		if info, err := os.Stat(local); err == nil && info.Mode().IsRegular() {
+			return local
+		}
+	}
+	return "claude"
 }

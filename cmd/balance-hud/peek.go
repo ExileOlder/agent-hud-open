@@ -79,6 +79,9 @@ func (r row) peekLine(slot int) []peekItem {
 		}
 		return r.Peek
 	}
+	if slot == 4 {
+		return []peekItem{{"Claude Code", "--", 0}}
+	}
 	if slot == 3 {
 		return []peekItem{{"Mistral", "--", 0}}
 	}

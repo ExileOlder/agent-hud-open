@@ -18,6 +18,8 @@ func clientRoute(slot int, thread string) string {
 		return "antigravity://"
 	case 3:
 		return "https://chat.mistral.ai/code"
+	case 4:
+		return "claude://"
 	default:
 		return ""
 	}

@@ -10,8 +10,8 @@ import (
 )
 
 type settingsTools struct {
-	codex, agy string
-	notices    <-chan codexnotice.Event
+	codex, agy, claude string
+	notices            <-chan codexnotice.Event
 }
 type settingsItem struct{ title, value string }
 type panelSettings struct {
@@ -44,12 +44,18 @@ func (s *panelSettings) items(p placement, rows []row) []settingsItem {
 		}
 		return rows[i].Identity
 	}
+	claudeStatus := "Sign in"
+	if rows[4].Percent >= 0 {
+		claudeStatus = status(4)
+	}
 	return []settingsItem{
 		{"Codex · sign in or switch account", status(0)},
 		{"Antigravity · first position", identity(1)},
 		{"Antigravity · second position", identity(2)},
 		{"Antigravity · authorize another account", "Authorize in browser"},
 		{"Mistral Vibe · connect subscription", status(3)},
+		{"Claude Code · show in HUD", onOff(p.ShowClaude)},
+		{"Claude Code · sign in", claudeStatus},
 	}
 }
 
@@ -163,6 +169,14 @@ func (s *panelSettings) apply(p *placement, index int, rows []row, t settingsToo
 		s.message = launchSettingsCommand(t.agy, "login", "--monitor-only")
 	case 4:
 		s.message = launchVibeSetup()
+	case 5:
+		p.ShowClaude = !p.ShowClaude
+		if p.ShowClaude {
+			s.message = "Claude added. Sign in to Claude Code if it has no reading."
+		}
+		return true, p.ShowClaude
+	case 6:
+		s.message = launchSettingsCommand(t.claude, "auth", "login")
 	}
 	return false, false
 }

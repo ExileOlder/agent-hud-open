@@ -32,7 +32,12 @@ func updateView(previous []row, results []result) []row {
 		if n.Identity != "" && !strings.EqualFold(n.Identity, old.Identity) {
 			continue
 		}
-		provider := map[int]string{0: "codex", 1: "antigravity", 2: "antigravity", 3: "mistral"}[i]
+		provider := [...]string{"codex", "antigravity", "antigravity", "mistral", "claude"}[i]
+		// Claude's usage response does not identify the signed-in account. A
+		// failed read after switching accounts should not show the old quota.
+		if provider == "claude" {
+			continue
+		}
 		keep := n.Identity != ""
 		for _, r := range results {
 			if r.Provider == provider && r.Error != "" {
@@ -59,6 +64,7 @@ func view(results []result) []row {
 		{Mark: "A1", Number: "--", Details: "Antigravity account 1: waiting for quota", Percent: -1},
 		{Mark: "A2", Number: "--", Details: "Antigravity account 2: waiting for quota", Percent: -1},
 		{Mark: "M", Number: "--", Details: "Mistral Vibe: waiting for quota", Percent: -1},
+		{Mark: "Cl", Number: "--", Details: "Claude Code: waiting for quota", Percent: -1},
 	}
 	for _, r := range results {
 		start, count := 0, 1
@@ -67,6 +73,8 @@ func view(results []result) []row {
 			start, count = 1, 2
 		case "mistral":
 			start = 3
+		case "claude":
+			start = 4
 		case "codex":
 		default:
 			continue
@@ -123,6 +131,14 @@ type placement struct {
 	Numbers      bool
 	ReduceMotion bool
 	Accounts     [2]string
+	ShowClaude   bool
+}
+
+func (p placement) slotCount() int {
+	if p.ShowClaude {
+		return 5
+	}
+	return 4
 }
 
 func settingsPath() string {

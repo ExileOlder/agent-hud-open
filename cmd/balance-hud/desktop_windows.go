@@ -106,7 +106,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	rows := view(nil)
 	var bar, tip, notice, prefs uintptr
 	var panel panelSettings
-	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 452, 176, 107, 49
+	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 535, 176, 107, 49
 	var messages []int
 	var noticeID int
 	var current codexnotice.Event
@@ -120,10 +120,11 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	var dragOrigin rect
 	var downAt time.Time
 	ready := make(chan []result, 1)
-	busy := false
+	busy, pending := false, false
 	next := time.Time{}
 	refresh := func() {
 		if busy {
+			pending = true
 			return
 		}
 		busy = true
@@ -273,7 +274,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		u("SetTimer", tip, 2, 16, 0)
 	}
 	details := func(i int) {
-		if i >= len(rows) || i < 0 {
+		if i >= p.slotCount() || i < 0 {
 			hide()
 			return
 		}
@@ -435,7 +436,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			return
 		}
 		now := time.Now()
-		frames, _ := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion)
+		frames, _ := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount())
 		barImage = paintBar(rows, p, frames, barImage)
 		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
 		info := struct {
@@ -558,7 +559,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			return false
 		}
 		slot := int((v - barPadding) / step)
-		if slot >= len(rows) {
+		if slot >= p.slotCount() {
 			return false
 		}
 		now := time.Now()
@@ -613,10 +614,11 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				if m.X < sidebarW && m.Y >= 68 && m.Y < 156 {
 					panel.page, panel.message = int((m.Y-68)/44), ""
 				} else if m.X >= sidebarW+28 && m.Y >= prefsTop && m.Y < prefsTop+int32(len(panel.items(p, rows)))*prefsRow {
+					count := p.slotCount()
 					changed, reload := panel.apply(&p, int((m.Y-prefsTop)/prefsRow), rows, tools)
 					if changed {
 						save()
-						if panel.page == 0 {
+						if panel.page == 0 || count != p.slotCount() {
 							hide()
 							place()
 						} else {
@@ -684,7 +686,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				return 0
 			case 0x113: // WM_TIMER
 				now := time.Now()
-				frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion)
+				frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount())
 				if previousFrames != frames {
 					previousFrames = frames
 					invalidate(bar)
@@ -717,6 +719,10 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				select {
 				case incoming := <-ready:
 					busy = false
+					if pending {
+						pending = false
+						refresh()
+					}
 					panel.raw = incoming
 					rows = updateView(rows, settingsResults(incoming, p))
 					if panel.message == "Refreshing balances…" {

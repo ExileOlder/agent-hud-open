@@ -42,6 +42,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		return errors.New("cannot open X11 display")
 	}
 	defer C.hud_close(h)
+	C.hud_slots(h, C.int(p.slotCount()))
 	set := func(rows []row) {
 		for i, r := range rows {
 			items := r.peekLine(i)
@@ -80,12 +81,14 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		C.hud_bitmap(h, C.int(frame.Bounds().Dx()), C.int(frame.Bounds().Dy()), (*C.uchar)(unsafe.Pointer(&frame.Pix[0])))
 	}
 	ready := make(chan []result, 1)
-	inFlight := false
+	inFlight, pending := false, false
 	refresh := func() {
-		if !inFlight {
-			inFlight = true
-			go func() { ready <- fetch() }()
+		if inFlight {
+			pending = true
+			return
 		}
+		inFlight = true
+		go func() { ready <- fetch() }()
 	}
 	refresh()
 	var current codexnotice.Event
@@ -124,6 +127,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		case action >= 20:
 			changed, reload := panel.apply(&p, action-20, rows, tools)
 			if changed {
+				C.hud_slots(h, C.int(p.slotCount()))
 				if e := p.save(); e != nil {
 					panel.message = "Could not save preferences: " + e.Error()
 				}
@@ -150,6 +154,10 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		select {
 		case incoming := <-ready:
 			inFlight = false
+			if pending {
+				pending = false
+				refresh()
+			}
 			panel.raw = incoming
 			rows = updateView(rows, settingsResults(incoming, p))
 			set(rows)
@@ -180,7 +188,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		if hover != lastHover {
 			hoverStart, lastHover = now, hover
 		}
-		frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion)
+		frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount())
 		animating = active
 		if dirty || frames != previousFrames {
 			paint(frames)

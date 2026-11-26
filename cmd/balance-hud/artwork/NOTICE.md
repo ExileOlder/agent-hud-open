@@ -1,6 +1,7 @@
 Original Agent HUD provider marks from agent-hud-open at v0.6.15.
 Codex uses chatgpt.png (tinted as in upstream), Antigravity uses antigravity.png,
 and the Mistral slot uses deepseek.png to match the previous local HUD's Vibe display.
+The optional Claude Code slot uses the original claude.png and its separately loaded animation sheets.
 The marks retain their respective owners' branding; this is not an endorsement.
 
 Go Regular and the image/font library are from golang.org/x/image (see

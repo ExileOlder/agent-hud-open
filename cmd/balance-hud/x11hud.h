@@ -18,3 +18,5 @@ void hud_appearance(Hud *,int,double,int,int);
 
 void hud_notice(Hud *,const char *);
 int hud_notice_active(Hud *);
+
+void hud_slots(Hud *,int);

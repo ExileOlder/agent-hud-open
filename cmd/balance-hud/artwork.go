@@ -20,6 +20,12 @@ import (
 //go:embed artwork/hover.png
 var hoverPNG []byte
 
+//go:embed artwork/claude-hover.png
+var claudeHoverPNG []byte
+
+//go:embed artwork/claude-idle.png
+var claudeIdlePNG []byte
+
 //go:embed artwork/idle.png
 var idlePNG []byte
 
@@ -36,6 +42,8 @@ var hoverAtlas image.Image
 var barFont font.Face
 
 var idleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(idlePNG) })
+var claudeHoverAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeHoverPNG) })
+var claudeIdleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeIdlePNG) })
 
 func decodeAtlas(data []byte) image.Image {
 	img, err := png.Decode(bytes.NewReader(data))
@@ -63,13 +71,13 @@ func barGeometry(p placement) (w, h, step int) {
 		step = barItemNumbers
 	}
 	if p.Edge%2 == 0 {
-		return 2*barPadding + 4*step, 2*barPadding + barItem, step
+		return 2*barPadding + p.slotCount()*step, 2*barPadding + barItem, step
 	}
 	w = barItem
 	if p.Numbers {
 		w = barItemNumbers
 	}
-	return w, 2*barPadding + 4*barItem, step
+	return w, 2*barPadding + p.slotCount()*barItem, step
 }
 
 // Native display draw calls consume an opaque BGRA image; window shapes
@@ -80,7 +88,7 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		dst = image.NewRGBA(image.Rect(0, 0, w, h))
 	}
 	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.RGBA{5, 7, 9, 255}), image.Point{}, draw.Src)
-	for i, r := range rows {
+	for i, r := range rows[:p.slotCount()] {
 		left, top := barPadding+i*step, barPadding
 		if p.Edge%2 != 0 {
 			left, top = 0, barPadding+i*barItem
@@ -121,9 +129,14 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 				dst.SetRGBA(xx, yy, px)
 			}
 		}
-		slot := [...]int{0, 1, 1, 2}[i]
+		slot := [...]int{0, 1, 1, 2, 0}[i]
 		frame, count, atlas := frames[i], hoverFrames, hoverAtlas
-		if frame < 0 {
+		if i == 4 {
+			atlas = claudeHoverAtlas()
+			if frame < 0 {
+				frame, count, atlas = -frame-1, idleFrames, claudeIdleAtlas()
+			}
+		} else if frame < 0 {
 			frame, count, atlas = -frame-1, idleFrames, idleAtlas()
 		}
 		x := frame % hoverColumns * hoverCell

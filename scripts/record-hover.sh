@@ -7,18 +7,23 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp -r "$1/packages/hud/src/bots" "$tmp/bots"
 cp "$root/scripts/record-hover.ts" "$tmp/record-hover.ts"
-marks=$(python3 - "$assets" <<'PY'
-import base64, json, pathlib, sys
+"${ESBUILD:-esbuild}" "$tmp/record-hover.ts" --bundle "--outfile=$tmp/hover.js"
+python3 - "$assets" > "$tmp/hover.html" <<'PY'
+import base64, pathlib, sys
 root = pathlib.Path(sys.argv[1])
-print(json.dumps(["data:image/png;base64," + base64.b64encode((root / f"{name}.png").read_bytes()).decode()
-                  for name in ("chatgpt", "antigravity", "deepseek")]))
+print('<!doctype html><body>')
+for name in ("chatgpt", "antigravity", "deepseek", "claude"):
+    data = base64.b64encode((root / f"{name}.png").read_bytes()).decode()
+    print(f'<img hidden src="data:image/png;base64,{data}">')
+print('<script src="hover.js"></script>')
 PY
-)
-"${ESBUILD:-esbuild}" "$tmp/record-hover.ts" --bundle "--define:MARKS=$marks" "--outfile=$tmp/hover.js"
-printf '<!doctype html><body><script src="hover.js"></script>\n' > "$tmp/hover.html"
-for mode in hover idle; do
+for mode in hover idle claude-hover claude-idle; do
   query=""
-  if [[ "$mode" == idle ]]; then query="?idle"; fi
+  case "$mode" in
+    idle) query="?idle";;
+    claude-hover) query="?claude";;
+    claude-idle) query="?claude&idle";;
+  esac
   "${BROWSER:-chromium}" --headless=new --disable-gpu --no-first-run --user-data-dir="$tmp/profile" \
     --virtual-time-budget=30000 --dump-dom "file://$tmp/hover.html$query" > "$tmp/dom.html"
   python3 - "$tmp/dom.html" "$assets/$mode.png" <<'PY'

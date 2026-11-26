@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { slots = 4, item = 92, wide = 148, pad = 4, peek_height = 64, peek_pad = 30, peek_gap = 12, peek_spacing = 30, gear = 45, max_cells = 8 };
+enum { slots = 5, item = 92, wide = 148, pad = 4, peek_height = 64, peek_pad = 30, peek_gap = 12, peek_spacing = 30, gear = 45, max_cells = 8 };
 typedef struct { char label[96], value[192]; int tone; } PeekCell;
 struct Hud {
     Display *d;
@@ -25,7 +25,7 @@ struct Hud {
     XftDraw *tip_draw, *prefs_draw, *notice_draw;
     XftColor text_color, muted_text, tones[4];
     Pixmap bitmap;
-    int bw, bh;
+    int bw, bh, visible_slots;
     int tip_x, tip_y, tip_w, tip_h, motion;
     int prefs_visible, page, prefs_count;
     PeekCell prefs_rows[8];
@@ -157,8 +157,8 @@ void hud_bitmap(Hud *h,int w,int height,const unsigned char *pixels){
 }
 static void place(Hud *h) {
     int v = vertical(h);
-    h->w = v ? (h->numbers ? wide : item) : 2 * pad + slots * step(h);
-    h->height = 2 * pad + (v ? slots * item : item);
+    h->w = v ? (h->numbers ? wide : item) : 2 * pad + h->visible_slots * step(h);
+    h->height = 2 * pad + (v ? h->visible_slots * item : item);
     h->x = h->sx + (v ? (h->edge == 1 ? h->sw - h->w - 3 : 3)
                           : (int)((h->sw - h->w) * h->offset));
     h->y = h->sy + (v ? (int)((h->sh - h->height) * h->offset)
@@ -256,7 +256,7 @@ static void draw_tip(Hud *h) {
 static int slot_at(Hud *h,int x,int y){
     int p=(vertical(h)?y:x)-pad;
     int i=p/step(h);
-    return p<0||i>=slots?-1:i;
+    return p<0||i>=h->visible_slots?-1:i;
 }
 static void pick(Hud *h, int x, int y) {
     int i=slot_at(h,x,y);
@@ -282,14 +282,14 @@ static void drop(Hud *h, int x, int y) {
     y=clamp(y,h->sy,h->sy+h->sh-1)-h->sy;
     int distances[] = {y, h->sw-1-x, h->sh-1-y, x};
     for(int i=0;i<4;i++)if(distances[i]<distances[h->edge])h->edge=i;
-    int run=vertical(h)?2*pad+slots*item:2*pad+slots*step(h);
+    int run=vertical(h)?2*pad+h->visible_slots*item:2*pad+h->visible_slots*step(h);
     int travel=vertical(h)?h->sh-run:h->sw-run;
     int offset=(vertical(h)?center_y:center_x)-run/2;
     h->offset=travel>0?(double)clamp(offset,0,travel)/travel:.5;
     place(h);
 }
 
-enum { prefs_w=760, prefs_h=452, sidebar_w=176, prefs_top=107, prefs_row=49 };
+enum { prefs_w=760, prefs_h=535, sidebar_w=176, prefs_top=107, prefs_row=49 };
 static void prefs_box(Hud *h,int x,int y,int w,int height,unsigned long fill) {
     XSetForeground(h->d,h->gc,fill);
     XFillRectangle(h->d,h->prefs,h->gc,x,y,w,height);
@@ -340,6 +340,12 @@ void hud_settings_show(Hud *h) {
     XMapRaised(h->d,h->prefs);
     draw_prefs(h); XFlush(h->d);
 }
+void hud_slots(Hud *h,int visible) {
+    visible=clamp(visible,4,slots);
+    if(h->visible_slots==visible)return;
+    h->visible_slots=visible;hide_tip(h);place(h);XFlush(h->d);
+}
+
 void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
     h->edge=edge;h->offset=offset;h->numbers=numbers;h->motion=motion;
     hide_tip(h);place(h);XFlush(h->d);
@@ -373,7 +379,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     if (!d) return NULL;
     Hud *h = calloc(1, sizeof(*h));
     if (!h) { XCloseDisplay(d); return NULL; }
-    h->d=d; h->root=DefaultRootWindow(d);
+    h->d=d; h->root=DefaultRootWindow(d);h->visible_slots=4;
     h->edge=edge; h->offset=offset; h->numbers=numbers; h->hover=-1; h->motion=motion;
     h->sw=DisplayWidth(d,DefaultScreen(d)); h->sh=DisplayHeight(d,DefaultScreen(d));
     XRRScreenResources *res = XRRGetScreenResourcesCurrent(d,h->root);
