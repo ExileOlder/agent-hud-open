@@ -8,12 +8,14 @@ import (
 	"image/png"
 	"os"
 
+	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
+
 	imagedraw "golang.org/x/image/draw"
 )
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: compact-atlas INPUT.png OUTPUT.png")
+		fmt.Fprintln(os.Stderr, "usage: compact-atlas INPUT.png OUTPUT.atlas")
 		os.Exit(2)
 	}
 	if err := compact(os.Args[1], os.Args[2]); err != nil {
@@ -33,26 +35,29 @@ func compact(input, output string) error {
 		return err
 	}
 	// Match the native bar's 29px mark radius and the recorder's 8 columns.
-	const target, columns = 58, 8
+	const target, columns = markatlas.Cell, markatlas.Columns
 	bounds := source.Bounds()
 	cell := bounds.Dx() / columns
-	if (cell != 64 && cell != 80) || cell*columns != bounds.Dx() || bounds.Dy()%cell != 0 {
+	if (cell != target && cell != 64 && cell != 80) || cell*columns != bounds.Dx() || bounds.Dy()%cell != 0 {
 		return fmt.Errorf("unexpected recorded atlas size: %v", bounds.Size())
 	}
 	rows := bounds.Dy() / cell
-	atlas := image.NewRGBA(image.Rect(0, 0, columns*target, rows*target))
-	scale := imagedraw.CatmullRom.NewScaler(target, target, cell, cell)
-	for y := range rows {
-		for x := range columns {
-			scale.Scale(atlas, image.Rect(x*target, y*target, (x+1)*target, (y+1)*target),
-				source, image.Rect(x*cell, y*cell, (x+1)*cell, (y+1)*cell), draw.Over, nil)
+	if cell != target {
+		resized := image.NewRGBA(image.Rect(0, 0, columns*target, rows*target))
+		scale := imagedraw.CatmullRom.NewScaler(target, target, cell, cell)
+		for y := range rows {
+			for x := range columns {
+				scale.Scale(resized, image.Rect(x*target, y*target, (x+1)*target, (y+1)*target),
+					source, image.Rect(x*cell, y*cell, (x+1)*cell, (y+1)*cell), draw.Over, nil)
+			}
 		}
+		source = resized
 	}
 	f, err := os.Create(output)
 	if err != nil {
 		return err
 	}
-	err = (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(f, atlas)
+	err = markatlas.Encode(f, source)
 	closeErr := f.Close()
 	if err != nil {
 		return err

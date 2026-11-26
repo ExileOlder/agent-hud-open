@@ -44,6 +44,6 @@ if not match:
     sys.exit(page[:1000])
 pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(match[1], validate=True))
 PY
-  go run ./scripts/compact-atlas.go "$tmp/recorded.png" "$tmp/compact.png"
-  mv -f "$tmp/compact.png" "$assets/$mode.png"
+  go run ./scripts/compact-atlas.go "$tmp/recorded.png" "$tmp/compact.atlas"
+  mv -f "$tmp/compact.atlas" "$assets/$mode.atlas"
 done

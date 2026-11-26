@@ -1,14 +1,15 @@
 package main
 
 import (
-	"image"
 	"testing"
+
+	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
 )
 
 func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
-		load          func() image.Image
+		load          func() markatlas.Atlas
 		slots, frames int
 	}{
 		{"hover", hoverAtlas, 3, hoverFrames},
@@ -23,9 +24,9 @@ func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 		{"completion", cueAtlas[cueDone], 4, cueFrames},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			want := image.Pt(hoverColumns*atlasCell, tc.slots*tc.frames/hoverColumns*atlasCell)
-			if got := tc.load().Bounds().Size(); got != want {
-				t.Fatalf("atlas dimensions = %v, want %v", got, want)
+			want := tc.slots * tc.frames
+			if got := tc.load().Len(); got != want {
+				t.Fatalf("atlas frame count = %d, want %d", got, want)
 			}
 		})
 	}

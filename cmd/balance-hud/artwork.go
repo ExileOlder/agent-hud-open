@@ -1,76 +1,74 @@
 package main
 
 import (
-	"bytes"
 	_ "embed"
 	"image"
 	"image/color"
 	"image/draw"
-	"image/png"
 	"math"
 	"sync"
+
+	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
 )
 
-//go:embed artwork/hover.png
-var hoverPNG []byte
+//go:embed artwork/hover.atlas
+var hoverData []byte
 
-//go:embed artwork/claude-hover.png
-var claudeHoverPNG []byte
+//go:embed artwork/claude-hover.atlas
+var claudeHoverData []byte
 
-//go:embed artwork/claude-idle.png
-var claudeIdlePNG []byte
+//go:embed artwork/claude-idle.atlas
+var claudeIdleData []byte
 
-//go:embed artwork/idle.png
-var idlePNG []byte
+//go:embed artwork/idle.atlas
+var idleData []byte
 
-//go:embed artwork/work.png
-var workPNG []byte
+//go:embed artwork/work.atlas
+var workData []byte
 
-//go:embed artwork/claude-work.png
-var claudeWorkPNG []byte
+//go:embed artwork/claude-work.atlas
+var claudeWorkData []byte
 
-//go:embed artwork/tool.png
-var toolPNG []byte
+//go:embed artwork/tool.atlas
+var toolData []byte
 
-//go:embed artwork/cue-question.png
-var cueQuestionPNG []byte
+//go:embed artwork/cue-question.atlas
+var cueQuestionData []byte
 
-//go:embed artwork/cue-permission.png
-var cuePermissionPNG []byte
+//go:embed artwork/cue-permission.atlas
+var cuePermissionData []byte
 
-//go:embed artwork/cue-done.png
-var cueDonePNG []byte
+//go:embed artwork/cue-done.atlas
+var cueDoneData []byte
 
 const (
 	barPadding     = 4
 	barItem        = 92
 	barItemNumbers = 148
 	hoverFrames    = 96
-	atlasCell      = 2 * markRadius
-	hoverColumns   = 8
-	markRadius     = 29
+	markRadius     = markatlas.Cell / 2
 )
 
-var hoverAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(hoverPNG) })
-var idleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(idlePNG) })
-var claudeHoverAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeHoverPNG) })
-var claudeIdleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeIdlePNG) })
+var hoverAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(hoverData) })
+var idleAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(idleData) })
+var claudeHoverAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(claudeHoverData) })
+var claudeIdleAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(claudeIdleData) })
 
-var workAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(workPNG) })
-var claudeWorkAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeWorkPNG) })
+var workAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(workData) })
+var claudeWorkAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(claudeWorkData) })
 
 // The upstream procedural performer shares this pose across tool kinds.
 // Keep a single atlas, not one duplicate sheet per status.
-var toolAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(toolPNG) })
+var toolAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(toolData) })
 
-var cueAtlas = [...]func() image.Image{
-	sync.OnceValue(func() image.Image { return decodeAtlas(cueQuestionPNG) }),
-	sync.OnceValue(func() image.Image { return decodeAtlas(cuePermissionPNG) }),
-	sync.OnceValue(func() image.Image { return decodeAtlas(cueDonePNG) }),
+var cueAtlas = [...]func() markatlas.Atlas{
+	sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(cueQuestionData) }),
+	sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(cuePermissionData) }),
+	sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(cueDoneData) }),
 }
 
-func decodeAtlas(data []byte) image.Image {
-	img, err := png.Decode(bytes.NewReader(data))
+func decodeAtlas(data []byte) markatlas.Atlas {
+	img, err := markatlas.Open(data)
 	if err != nil {
 		panic(err)
 	}
@@ -153,7 +151,7 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		}
 		slot := [...]int{0, 1, 1, 2, 0}[i]
 		frame, count := frames[i], hoverFrames
-		var atlas image.Image
+		var atlas markatlas.Atlas
 		if frame >= pendingBase {
 			look := (frame - pendingBase) / waitAtlasFrames
 			frame, count, atlas = (frame-pendingBase)%waitAtlasFrames, waitAtlasFrames, cueAtlas[look]()
@@ -189,13 +187,10 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		} else if frame < 0 {
 			frame, count, atlas = -frame-1, idleFrames, idleAtlas()
 		}
-		if atlas == nil {
+		if atlas.Len() == 0 {
 			atlas = hoverAtlas()
 		}
-		x := frame % hoverColumns * atlasCell
-		y := (slot*count/hoverColumns + frame/hoverColumns) * atlasCell
-		draw.Draw(dst, image.Rect(cx-markRadius, cy-markRadius, cx+markRadius, cy+markRadius),
-			atlas, image.Pt(x, y), draw.Over)
+		atlas.Draw(dst, image.Pt(cx-markRadius, cy-markRadius), slot*count+frame)
 	}
 	// The targets use little-endian 32-bit BGRX pixels.
 	for i := 0; i < len(dst.Pix); i += 4 {

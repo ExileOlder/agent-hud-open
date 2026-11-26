@@ -10,6 +10,7 @@
 *.jpg binary
 *.jpeg binary
 *.png binary
+*.atlas binary
 *.webp binary
 *.mp4 binary
 *.mov binary
