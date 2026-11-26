@@ -28,7 +28,7 @@ func fillMailRect(dc uintptr, x, y, w, h int32, brush uintptr) {
 	rc := rect{x, y, x + w, y + h}
 	u("FillRect", dc, uintptr(unsafe.Pointer(&rc)), brush)
 }
-func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int32, string, uintptr), labelFont, headFont, bgBrush uintptr) {
+func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int32, string, uintptr), labelFont, headFont, bgBrush uintptr, measure func(uintptr, string) int32) {
 	switch hwnd {
 	case m.badge:
 		g("SelectObject", dc, labelFont)
@@ -64,7 +64,7 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 			y := int32(mailHeader + i*mailRow)
 			fillMailRect(dc, 15, y, int32(m.lastPanel.w-30), mailRow-4, bgBrush)
 			write(dc, 27, y+14, agentNames[item.agent], 0xf6f4f2)
-			write(dc, 168, y+14, noticeCopy(item.event.Question), 0xd4d0cc)
+			write(dc, max(168, 27+measure(dc, agentNames[item.agent])+18), y+14, noticeCopy(item.event.Question), 0xd4d0cc)
 		}
 	case m.paper:
 		pen := g("CreatePen", 0, 1, 0xffaa7e)

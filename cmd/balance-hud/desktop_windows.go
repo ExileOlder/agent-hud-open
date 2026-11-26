@@ -110,6 +110,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	notices := tools.notices
 	var work workingMarks
 	agyActivity := tools.antigravityActivity
+	dshActivity := tools.deepSeekActivity
 	var iconClick time.Time
 	lastSlot := -1
 	var area, frame rect
@@ -405,7 +406,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			defer g("SelectObject", dc, old)
 		}
 		if hwnd == mail.badge || hwnd == mail.panel || hwnd == mail.paper {
-			mail.renderWindow(hwnd, dc, write, prefsFont, valueFont, sideBG)
+			mail.renderWindow(hwnd, dc, write, prefsFont, valueFont, sideBG, measure)
 			return
 		}
 		if hwnd == prefs {
@@ -591,7 +592,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		if action, handled := mail.windowAction(hwnd, msg, wp, lp); handled {
 			if item, ok := mail.action(action); ok {
-				openProvider(completionSlot(item.agent), item.event.Thread)
+				openNotice(item)
 			}
 			renderMail(time.Now())
 			return 0
@@ -686,6 +687,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 					invalidate(bar)
 				}
 				select {
+				case state, ok := <-dshActivity:
+					if ok {
+						work.updateDeepSeek(state, &mail.mailInbox, time.Now(), !p.ReduceMotion)
+					} else {
+						dshActivity = nil
+					}
 				case active, ok := <-agyActivity:
 					if ok {
 						work.updateAntigravity(active, time.Now())
@@ -695,11 +702,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				case event, ok := <-notices:
 					if ok {
 						if event.Activity {
-							if event.Working {
-								work.codex = now
-							} else {
-								work.codex = time.Time{}
-							}
+							work.updateCodex(event, now)
 						} else {
 							mail.receive(mailItem{agent: 1, event: event}, now, !p.ReduceMotion)
 						}

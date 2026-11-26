@@ -1,6 +1,7 @@
 package codexnotice
 
 import (
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -45,7 +46,7 @@ INSERT INTO thread_turns VALUES ('stale-thread','stale','inProgress',NULL,NULL,s
 	if len(events) != 3 ||
 		events[0] != (Event{Thread: "done-thread", ID: "done:done"}) ||
 		events[1] != (Event{Thread: "question-thread", ID: "question:question-item", Question: true}) ||
-		events[2] != (Event{Activity: true, Working: true}) {
+		events[2] != (Event{Activity: true, Working: true, Tool: agentactivity.Command}) {
 		t.Fatalf("wrong event projection: %+v", events)
 	}
 }

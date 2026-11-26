@@ -106,6 +106,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	notices := tools.notices
 	var work workingMarks
 	agyActivity := tools.antigravityActivity
+	dshActivity := tools.deepSeekActivity
 	renderMail := func(now time.Time) {
 		var n [8]C.int
 		C.hud_mail_bounds(h, &n[0])
@@ -179,7 +180,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			drawSettings()
 		case (action >= 90 && action <= 94) || action >= 300:
 			if item, ok := mail.action(action); ok {
-				openProvider(completionSlot(item.agent), item.event.Thread)
+				openNotice(item)
 			}
 		case action >= 200:
 			event := decodeHook(action-200, uint32(C.hud_hook_session(h)))
@@ -233,6 +234,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		default:
 		}
 		select {
+		case state, ok := <-dshActivity:
+			if ok {
+				work.updateDeepSeek(state, &mail, time.Now(), !p.ReduceMotion)
+			} else {
+				dshActivity = nil
+			}
 		case active, ok := <-agyActivity:
 			if ok {
 				work.updateAntigravity(active, time.Now())
@@ -242,11 +249,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		case event, ok := <-notices:
 			if ok {
 				if event.Activity {
-					if event.Working {
-						work.codex = time.Now()
-					} else {
-						work.codex = time.Time{}
-					}
+					work.updateCodex(event, time.Now())
 				} else {
 					mail.receive(mailItem{agent: 1, event: event}, time.Now(), !p.ReduceMotion)
 				}

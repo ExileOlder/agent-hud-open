@@ -459,7 +459,8 @@ static void draw_mail_panel(Hud *h) {
         XSetForeground(h->d,h->gc,h->side_bg);
         XFillRectangle(h->d,h->mail_panel,h->gc,15,y,width-30,mail_row-4);
         mail_text(h->mail_draw,&h->text_color,h->prefs_font,27,y+30,h->mail_rows[i].label);
-        mail_text(h->mail_draw,&h->muted_text,h->notice_font,168,y+30,h->mail_rows[i].value);
+        int status_x=27+text_width(h,h->prefs_font,h->mail_rows[i].label)+18;
+        mail_text(h->mail_draw,&h->muted_text,h->notice_font,status_x>168?status_x:168,y+30,h->mail_rows[i].value);
     }
 }
 void hud_mail_row(Hud *h,int i,const char *title,const char *body){
@@ -720,7 +721,7 @@ int hud_step(Hud *h,int timeout) {
         if(e.type==ClientMessage && e.xclient.window==h->bar &&
            e.xclient.message_type==h->completion && e.xclient.format==32){
             long code=e.xclient.data.l[0];
-            if(code>=1&&code<32){
+            if(code>=1&&code<56){
                 h->hook_session=(unsigned int)e.xclient.data.l[1];
                 return 200+(int)code;
             }

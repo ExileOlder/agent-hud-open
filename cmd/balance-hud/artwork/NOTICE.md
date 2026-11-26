@@ -16,3 +16,7 @@ at the Agent HUD source containing `packages/hud/src/bots`. The native app
 plays the hover sequence once and holds its final frame until the pointer leaves.
 An idle visit plays independently on each mark every few dozen seconds.
 The compact peek is a native adaptation of the Simple dock's AgentPeek layout.
+
+The `tool.png` atlas samples the same Apache-2.0 procedural renderer used above.
+In upstream that renderer shares its work motion across tool kinds. The separate
+Anthropic Clawd desktop sprites are not included in this distribution.

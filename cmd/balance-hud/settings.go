@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"sort"
 	"strings"
@@ -12,7 +13,8 @@ import (
 type settingsTools struct {
 	codex, agy, claude  string
 	notices             <-chan codexnotice.Event
-	antigravityActivity <-chan map[string]bool
+	antigravityActivity <-chan map[string]agentactivity.Tool
+	deepSeekActivity    <-chan agentactivity.DeepSeekStatus
 }
 type settingsItem struct{ title, value string }
 type panelSettings struct {

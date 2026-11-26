@@ -27,7 +27,8 @@ type step struct {
 // The upstream reducer treats user input and planner tool calls as in flight.
 // A planner response without tools ends on DONE, ERROR or CANCELED. Tool
 // responses only renew existing work. No conversation text leaves this reader.
-func antigravityWorking(tail []byte) bool {
+func antigravityPose(tail []byte) (Tool, bool) {
+	returned := false
 	for end := len(tail); end > 0; {
 		i := bytes.LastIndexByte(tail[:end], '\n')
 		var s step
@@ -35,60 +36,80 @@ func antigravityWorking(tail []byte) bool {
 			switch s.Kind {
 			case "USER_INPUT":
 				if s.Source != "SYSTEM" {
-					return true
+					return Think, true
 				}
+			case "TOOL_RESPONSE", "GENERIC":
+				returned = true
 			case "PLANNER_RESPONSE":
 				if s.Status == "ERROR" || s.Status == "CANCELED" {
-					return false
+					return Think, false
 				}
-				return len(s.Tools) > 0 || s.Status != "DONE"
+				if !returned {
+					for _, raw := range s.Tools {
+						var call struct {
+							Name string `json:"name"`
+						}
+						if json.Unmarshal(raw, &call) != nil {
+							_ = json.Unmarshal(raw, &call.Name)
+						}
+						if kind := ClassifyTool(call.Name); kind != Think {
+							return kind, true
+						}
+					}
+				}
+				return Think, len(s.Tools) > 0 || s.Status != "DONE"
 			}
 		}
 		end = i
 	}
-	return false
+	return Think, false
 }
 
-func readAntigravityTail(path string) bool {
+func readAntigravityTail(path string) (Tool, bool) {
 	const bytesToRead = 128 << 10
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return Think, false
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return false
+		return Think, false
 	}
 	if info.Size() > bytesToRead {
 		if _, err = f.Seek(-bytesToRead, io.SeekEnd); err != nil {
-			return false
+			return Think, false
 		}
 	}
 	b, err := io.ReadAll(io.LimitReader(f, bytesToRead))
-	return err == nil && antigravityWorking(b)
+	if err != nil {
+		return Think, false
+	}
+	return antigravityPose(b)
 }
 
 type cached struct {
 	modified time.Time
 	size     int64
 	running  bool
+	tool     Tool
 }
 
-func WatchAntigravity(ctx context.Context, profiles []AntigravityProfile) <-chan map[string]bool {
+func WatchAntigravity(ctx context.Context, profiles []AntigravityProfile) <-chan map[string]Tool {
 	if len(profiles) == 0 {
 		return nil
 	}
-	out := make(chan map[string]bool, 1)
+	out := make(chan map[string]Tool, 1)
 	go func() {
 		defer close(out)
 		ticker := time.NewTicker(2500 * time.Millisecond)
 		defer ticker.Stop()
 		files := map[string]cached{}
-		before := map[string]bool{}
+		before := map[string]Tool{}
 		for {
 			now := time.Now()
-			next := map[string]bool{}
+			next := map[string]Tool{}
+			bestAt := map[string]time.Time{}
 			keep := map[string]cached{}
 			for _, p := range profiles {
 				if p.Account == "" || !filepath.IsAbs(p.GeminiHome) {
@@ -110,19 +131,23 @@ func WatchAntigravity(ctx context.Context, profiles []AntigravityProfile) <-chan
 						}
 						state := files[path]
 						if state.modified != info.ModTime() || state.size != info.Size() {
-							state = cached{info.ModTime(), info.Size(), readAntigravityTail(path)}
+							tool, running := readAntigravityTail(path)
+							state = cached{info.ModTime(), info.Size(), running, tool}
 						}
 						keep[path] = state
 						if state.running {
-							next[strings.ToLower(p.Account)] = true
+							key := strings.ToLower(p.Account)
+							if at := bestAt[key]; at.IsZero() || (next[key] == Think && state.tool != Think) || (next[key] == Think) == (state.tool == Think) && state.modified.After(at) {
+								next[key], bestAt[key] = state.tool, state.modified
+							}
 						}
 					}
 				}
 			}
 			files = keep
 			changed := len(next) != len(before)
-			for key := range next {
-				if !before[key] {
+			for key, kind := range next {
+				if prev, ok := before[key]; !ok || prev != kind {
 					changed = true
 					break
 				}

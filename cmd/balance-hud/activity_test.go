@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"testing"
 	"time"
 )
@@ -8,7 +9,7 @@ import (
 func TestAntigravityAnimationFollowsIdentityAcrossSlotSwap(t *testing.T) {
 	now := time.Now()
 	var status workingMarks
-	status.updateAntigravity(map[string]bool{"first@example.test": true}, now)
+	status.updateAntigravity(map[string]agentactivity.Tool{"first@example.test": agentactivity.Read}, now)
 	rows := view(nil)
 	rows[1].Identity, rows[2].Identity = "FIRST@example.test", "second@example.test"
 	want := [5]time.Duration{-1, time.Second, -1, -1, -1}
@@ -50,5 +51,34 @@ func TestHookTracksOverlappingSessionsAndWaits(t *testing.T) {
 	send(3, hookEnd, 12)
 	if len(inbox.items) != 2 || inbox.items[0].event.Question || hookAge(now, work.hooks[0]) >= 0 {
 		t.Fatal("session-end must stop without a fake completion")
+	}
+}
+
+func TestNativeToolPoseTransitions(t *testing.T) {
+	now := time.Now()
+	p := placement{ShowClaude: true}
+	rows := view(nil)
+	var w workingMarks
+	var inbox mailInbox
+	w.hook(hookEvent{5, hookRead, 1}, &inbox, now, false)
+	frames, on := w.frames(rows, now, now, now, -1, p)
+	if !on || frames[4] != toolBase {
+		t.Fatalf("read pose=%v", frames)
+	}
+	w.hook(hookEvent{5, hookEdit, 1}, &inbox, now, false)
+	frames, _ = w.frames(rows, now, now, now, -1, p)
+	if frames[4] != toolBase+toolFrames {
+		t.Fatalf("edit pose=%v", frames)
+	}
+	w.hook(hookEvent{5, hookCommand, 1}, &inbox, now, false)
+	at := now.Add(20 * time.Second)
+	frames, _ = w.frames(rows, at, at, at, -1, p)
+	if frames[4] != toolBase+3*toolFrames {
+		t.Fatalf("long command pose=%v", frames)
+	}
+	w.hook(hookEvent{5, hookWork, 1}, &inbox, at, false)
+	frames, _ = w.frames(rows, at, at, at, -1, p)
+	if frames[4] < workBase || frames[4] >= toolBase {
+		t.Fatalf("thinking pose=%v", frames)
 	}
 }

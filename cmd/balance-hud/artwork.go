@@ -31,6 +31,9 @@ var workPNG []byte
 //go:embed artwork/claude-work.png
 var claudeWorkPNG []byte
 
+//go:embed artwork/tool.png
+var toolPNG []byte
+
 const (
 	barPadding     = 4
 	barItem        = 92
@@ -45,6 +48,9 @@ var hoverAtlas image.Image
 
 // Every provider mark uses the same cell and target size. Reuse the
 // high-quality filter weights and its scratch buffer between animation frames.
+const toolCell = 64
+
+var toolScaler = imagedraw.CatmullRom.NewScaler(2*markRadius, 2*markRadius, toolCell, toolCell)
 var markScaler = imagedraw.CatmullRom.NewScaler(2*markRadius, 2*markRadius, hoverCell, hoverCell)
 
 var idleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(idlePNG) })
@@ -53,6 +59,10 @@ var claudeIdleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(cla
 
 var workAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(workPNG) })
 var claudeWorkAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeWorkPNG) })
+
+// The upstream procedural performer shares this pose across tool kinds.
+// Keep a single atlas, not one duplicate sheet per status.
+var toolAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(toolPNG) })
 
 func decodeAtlas(data []byte) image.Image {
 	img, err := png.Decode(bytes.NewReader(data))
@@ -142,7 +152,14 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		}
 		slot := [...]int{0, 1, 1, 2, 0}[i]
 		frame, count, atlas := frames[i], hoverFrames, hoverAtlas
-		if frame >= workBase {
+		cell, scaler := hoverCell, markScaler
+		if frame >= toolBase {
+			frame, count, atlas = (frame-toolBase)%toolFrames, toolFrames, toolAtlas()
+			if i == 4 {
+				slot = 3
+			}
+			cell, scaler = toolCell, toolScaler
+		} else if frame >= workBase {
 			frame, count = frame-workBase, workFrames
 			if i == 4 {
 				atlas = claudeWorkAtlas()
@@ -157,10 +174,10 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		} else if frame < 0 {
 			frame, count, atlas = -frame-1, idleFrames, idleAtlas()
 		}
-		x := frame % hoverColumns * hoverCell
-		y := (slot*count/hoverColumns + frame/hoverColumns) * hoverCell
-		markScaler.Scale(dst, image.Rect(cx-markRadius, cy-markRadius, cx+markRadius, cy+markRadius),
-			atlas, image.Rect(x, y, x+hoverCell, y+hoverCell), draw.Over, nil)
+		x := frame % hoverColumns * cell
+		y := (slot*count/hoverColumns + frame/hoverColumns) * cell
+		scaler.Scale(dst, image.Rect(cx-markRadius, cy-markRadius, cx+markRadius, cy+markRadius),
+			atlas, image.Rect(x, y, x+cell, y+cell), draw.Over, nil)
 	}
 	// The targets use little-endian 32-bit BGRX pixels.
 	for i := 0; i < len(dst.Pix); i += 4 {

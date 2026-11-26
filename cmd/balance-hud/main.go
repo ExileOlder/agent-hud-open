@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"github.com/ExileOlder/agent-hud-open/internal/quota"
 )
@@ -78,7 +79,7 @@ func main() {
 		if home != "" {
 			notices = codexnotice.Watch(ctx, home)
 		}
-		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, claude: *claude, notices: notices, antigravityActivity: watchAntigravity(ctx)}); err != nil {
+		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, claude: *claude, notices: notices, antigravityActivity: watchAntigravity(ctx), deepSeekActivity: agentactivity.WatchDeepSeek(ctx, deepSeekHome())}); err != nil {
 			println(err.Error())
 			os.Exit(1)
 		}

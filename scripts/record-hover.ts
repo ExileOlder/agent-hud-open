@@ -3,18 +3,19 @@
 import { makeForm } from "./bots/bot-form";
 import { BotMotion } from "./bots/bot-motion";
 import { renderBot } from "./bots/bot-renderer";
-import { botState } from "./bots/bot-state";
+import { botState, type BotLook } from "./bots/bot-state";
 import { SplitMix } from "./bots/bot-pace";
 
 const marks = document.images;
-const cell = 80, side = 54, count = 40, columns = 8;
-const idleFPS = 16, idleCount = 88;
 const query = new URLSearchParams(location.search);
+const tool = query.get("tool") as BotLook | null;
+const cell = tool ? 64 : 80, side = tool ? 43 : 54, count = 40, columns = 8;
+const idleFPS = 16, idleCount = 88;
 const idle = query.has("idle");
 const work = query.has("work");
 const workFPS = 12, workCount = 48;
-const keys = query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
-const frames = work ? workCount : idle ? idleCount : count;
+const keys = tool ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
+const frames = tool ? 32 : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
 sheet.height = keys.length * frames / columns * cell;
@@ -40,8 +41,8 @@ async function record() {
     motion.set(botState({look: "idle"}), 0);
     motion.step(0);
     let start = 0, frameRate = 25;
-    if (work) {
-      motion.set(botState({look: "thinking"}), 0);
+    if (work || tool) {
+      motion.set(botState({look: tool ?? "thinking"}), 0);
       frameRate = workFPS;
       start = workFPS;
       for (let i = 1; i < start; i++) motion.step(i / frameRate);

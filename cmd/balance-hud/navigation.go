@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"os"
 	"regexp"
 )
@@ -24,7 +25,31 @@ func clientRoute(slot int, thread string) string {
 		return ""
 	}
 }
+func openNotice(item mailItem) {
+	if item.agent == deepSeekAgent {
+		openDeepSeek()
+		return
+	}
+	if item.agent == 3 {
+		if err := openClientURI(clientRoute(3, "")); err != nil {
+			os.Stderr.WriteString(err.Error() + "\n")
+		}
+		return
+	}
+	openProvider(completionSlot(item.agent), item.event.Thread)
+}
+
+func openDeepSeek() {
+	if err := launchDeepSeek(); err != nil {
+		os.Stderr.WriteString("Could not open DeepSeek Harness: " + err.Error() + "\n")
+	}
+}
+
 func openProvider(slot int, thread string) {
+	if slot == 3 && agentactivity.DeepSeekHome(deepSeekHome()) {
+		openDeepSeek()
+		return
+	}
 	if route := clientRoute(slot, thread); route != "" {
 		if err := openClientURI(route); err != nil {
 			os.Stderr.WriteString("Could not open client: " + err.Error() + "\n")

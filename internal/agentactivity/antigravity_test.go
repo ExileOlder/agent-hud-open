@@ -16,7 +16,7 @@ func TestAntigravityLifecycleTail(t *testing.T) {
 		{`{"type":"USER_INPUT","source":"SYSTEM"}`, false},
 		{prompt + "\n" + `{"type":"PLANNER_RE`, true},
 	} {
-		if got := antigravityWorking([]byte(test.steps)); got != test.working {
+		if _, got := antigravityPose([]byte(test.steps)); got != test.working {
 			t.Errorf("working %t, want %t for %q", got, test.working, test.steps)
 		}
 	}

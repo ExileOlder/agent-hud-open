@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"time"
 )
 
@@ -10,6 +11,8 @@ const (
 	workFPS    = 12
 	workFrames = 48
 	workBase   = hoverFrames
+	toolBase   = workBase + workFrames
+	toolFrames = 32
 )
 
 // An idle visit wakes after about 20–35 seconds like the original HUD.
@@ -55,4 +58,14 @@ func workAge(now, started time.Time) time.Duration {
 		return -1
 	}
 	return max(0, now.Sub(started))
+}
+
+// Original director switches a shell call to the long-command look at 20s.
+func toolFrame(tool agentactivity.Tool, age time.Duration) int {
+	if tool == agentactivity.Command && age >= 20*time.Second {
+		tool = agentactivity.LongCommand
+		age -= 20 * time.Second
+	}
+	frame := int(max(0, age)*workFPS/time.Second) % toolFrames
+	return toolBase + (int(tool)-1)*toolFrames + frame
 }

@@ -44,7 +44,7 @@ func TestNativeLifecyclePayload(t *testing.T) {
 		{3, `{"notification_type":"question_asked","session_id":"one"}`, hookWait, true},
 		{3, `{"notification_type":"turn_failed","session_id":"one"}`, hookEnd, true},
 		{3, `{"hook_event_name":"pre_llm","session_id":"child","parent_session_id":"one"}`, hookWork, false},
-		{5, `{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"one"}`, hookWait, false},
+		{5, `{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"one"}`, hookCommand, true},
 	} {
 		e := parseHook(tc.agent, strings.NewReader(tc.payload))
 		if tc.valid && (e.agent != tc.agent || e.phase != tc.phase || e.session == 0 || e != decodeHook(e.code(), e.session)) || !tc.valid && e.agent != 0 {

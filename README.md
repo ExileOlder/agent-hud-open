@@ -62,14 +62,21 @@ cards send a paper plane to the message badge at the end of the dock. Hover or
 click the badge to open the message list. Balance HUD reads event types and IDs
 from Codex's local history projection and shows only a short status.
 Double-click a Codex notice to return to its conversation. Double-click a floating
-mark to open its client via the system's registered handler; the Mistral Vibe mark
-opens its web client. Linux uses the platform's SQLite library, and Windows uses
+mark to open its client. If DeepSeek Harness is installed, the fourth mark
+opens Harness while continuing to show the Mistral Vibe subscription balance.
+Otherwise the fourth mark opens Mistral Vibe on the web. Linux uses the platform's SQLite library, and Windows uses
 its inbox WinSQLite3 library. If the Codex version has no compatible history
 projection, CLI completion hooks are still available.
 
 Completion hooks from Antigravity, Mistral Vibe, and Claude Code land in the
 same message list. Double-click a message to open its client. Keep Balance HUD
 running to receive hook messages.
+
+With DeepSeek Harness 0.2's local projection cache, working turns and pending
+questions reach the HUD directly. The watcher uses `DSH_HOME` or `~/.dsh`. The
+Mistral quota source and the Harness task state are independent. On Linux the
+mark uses the installed `deepseek-harness-tools.desktop` shortcut; Windows
+uses the Harness’s `dsh://open` handler.
 
 For automatic reminders, add just the indicated completion hook to each client you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
 
@@ -85,12 +92,18 @@ For automatic reminders, add just the indicated completion hook to each client y
   {"balance-hud":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed antigravity -hook","timeout":5}]}]}}
   ```
 
-- **[Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/hooks):** merge the three entries below into `~/.vibe/hooks.toml` (or the active Vibe home). Replace the old Balance HUD `turn_completed` entry to avoid duplicate reminders. The Vibe subscription provides quota; task events come from the CLI.
+- **[Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/hooks):** merge the entries below into `~/.vibe/hooks.toml` (or the active Vibe home). Replace the old Balance HUD `turn_completed` entry to avoid duplicate reminders. The Vibe subscription provides quota; task events come from the CLI.
 
   ```toml
   [[hooks]]
   name = "balance-hud-work"
   type = "pre_llm"
+  command = "'/path/to/balance-hud' -completed mistral -hook"
+  timeout = 5
+
+  [[hooks]]
+  name = "balance-hud-tool"
+  type = "pre_tool"
   command = "'/path/to/balance-hud' -completed mistral -hook"
   timeout = 5
 
@@ -108,10 +121,10 @@ For automatic reminders, add just the indicated completion hook to each client y
   timeout = 5
   ```
 
-- **[Claude Code](https://code.claude.com/docs/en/hooks):** in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`, use the same command handler for `Stop`, `StopFailure`, `SessionEnd`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, and `PostToolUseFailure`. Also add the handler under `PreToolUse` with the matcher `AskUserQuestion`. Retain one Balance HUD entry per event and leave other client hooks in place. Example group for `PreToolUse`:
+- **[Claude Code](https://code.claude.com/docs/en/hooks):** in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`, use the same command handler for `Stop`, `StopFailure`, `SessionEnd`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, and `PostToolUseFailure`. Add the handler under `PreToolUse` without a matcher to track tool activity and questions. Replace the earlier HUD-only `AskUserQuestion` handler if present. Retain one Balance HUD entry per event and leave other client hooks in place. Example group for `PreToolUse`:
 
   ```json
-  {"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed claude -hook","timeout":5}]}
+  {"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed claude -hook","timeout":5}]}
   ```
 
   Keep `Stop` for completion only if you do not want working animations or waiting reminders. Claude reports a finish only once background and scheduled work are clear.

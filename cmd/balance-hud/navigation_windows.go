@@ -15,3 +15,5 @@ func openClientURI(uri string) error {
 	}
 	return nil
 }
+
+func launchDeepSeek() error { return openClientURI("dsh://open") }

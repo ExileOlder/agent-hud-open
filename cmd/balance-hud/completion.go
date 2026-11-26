@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"hash/fnv"
 	"io"
 	"strings"
 	"time"
 )
 
-var agentNames = []string{"", "Codex", "Antigravity", "Mistral Vibe", "Agent", "Claude Code"}
+const deepSeekAgent = 6
+
+var agentNames = []string{"", "Codex", "Antigravity", "Mistral Vibe", "Agent", "Claude Code", "DeepSeek Harness"}
 
 func completionID(name string) int {
 	switch strings.ToLower(name) {
@@ -35,7 +38,7 @@ func completionSlot(agent int) int {
 		return 0
 	case 2:
 		return 1
-	case 3:
+	case 3, deepSeekAgent:
 		return 3
 	case 5:
 		return 4
@@ -52,6 +55,9 @@ const (
 	hookWork
 	hookWait
 	hookEnd
+	hookRead
+	hookEdit
+	hookCommand
 )
 const hookPhaseStep = 8
 
@@ -64,7 +70,7 @@ type hookEvent struct {
 func (e hookEvent) code() int { return e.agent + hookPhaseStep*int(e.phase) }
 func decodeHook(code int, session uint32) hookEvent {
 	agent, phase := code%hookPhaseStep, hookPhase(code/hookPhaseStep)
-	if agent <= 0 || agent >= len(agentNames) || phase < hookComplete || phase > hookEnd {
+	if agent <= 0 || agent >= len(agentNames) || phase < hookComplete || phase > hookCommand {
 		return hookEvent{}
 	}
 	if phase != hookComplete && ((agent != 3 && agent != 5) || session == 0) {
@@ -120,6 +126,8 @@ func parseHook(id int, r io.Reader) hookEvent {
 			phase = hookWait
 		default:
 			switch event.Event {
+			case "pre_tool":
+				phase = toolPhase(event.Tool)
 			case "pre_agent", "pre_llm", "post_tool":
 				phase = hookWork
 			case "session_end":
@@ -139,10 +147,11 @@ func parseHook(id int, r io.Reader) hookEvent {
 		case "PermissionRequest":
 			phase = hookWait
 		case "PreToolUse":
-			if event.Tool != "AskUserQuestion" {
-				return hookEvent{}
+			if event.Tool == "AskUserQuestion" {
+				phase = hookWait
+			} else {
+				phase = toolPhase(event.Tool)
 			}
-			phase = hookWait
 		case "SessionEnd", "StopFailure":
 			phase = hookEnd
 		default:
@@ -152,6 +161,19 @@ func parseHook(id int, r io.Reader) hookEvent {
 		return hookEvent{}
 	}
 	return decodeHook(id+int(phase)*hookPhaseStep, session)
+}
+
+func toolPhase(name string) hookPhase {
+	switch agentactivity.ClassifyTool(name) {
+	case agentactivity.Read:
+		return hookRead
+	case agentactivity.Edit:
+		return hookEdit
+	case agentactivity.Command:
+		return hookCommand
+	default:
+		return hookWork
+	}
 }
 
 func runCompletion(name string, hook bool, input io.Reader, output io.Writer) error {
