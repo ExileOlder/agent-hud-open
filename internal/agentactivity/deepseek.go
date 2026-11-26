@@ -122,18 +122,14 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 							state.Questions = append(state.Questions, session+"/"+strconv.Itoa(c.questionSeq))
 						}
 					}
+					terminal := 0
 					if !c.running && c.turnSeq > 0 && c.turnSeq != c.scannedSeq {
 						switch {
-						case c.modified.Before(started) || now.Sub(c.modified) >= 2*time.Minute:
+						case old.modified.IsZero() && c.modified.Before(started) || now.Sub(c.modified) >= 2*time.Minute:
 							// Skip pre-existing history or terminal records that stayed unreadable.
 							c.scannedSeq = c.turnSeq
 						default:
-							if ending, ok := readDeepSeekTurnEnd(home, session, c.turnSeq); ok {
-								c.scannedSeq = c.turnSeq
-								if ending.successfulSince(started) {
-									state.Completed++
-								}
-							}
+							terminal = c.turnSeq
 						}
 					}
 					turn := noDeepSeekTurn
@@ -141,8 +137,15 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 						turn = *c.openTurn
 					}
 					if c.running || c.log.compacting(now) || now.Sub(c.modified) < deepSeekCompactLifetime {
-						for _, id := range c.log.watch(home, session, turn) {
+						ids, ending, found := c.log.watch(home, session, turn, terminal)
+						for _, id := range ids {
 							state.Approvals = append(state.Approvals, session+"/"+id)
+						}
+						if found {
+							c.scannedSeq = terminal
+							if ending.successfulSince(started) {
+								state.Completed++
+							}
 						}
 					}
 					retain[f.Name()] = c

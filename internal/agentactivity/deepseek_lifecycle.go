@@ -19,13 +19,25 @@ import (
 // events. Observe compaction even outside a turn; approvals belong to the
 // open turn selected by the projection.
 type deepSeekLifecycle struct {
-	path    string
-	info    os.FileInfo
-	offset  int64 // last completely decoded compressed frame boundary
-	turn    int
-	closed  bool
-	pending map[string]struct{}
-	compact deepSeekCompaction
+	path        string
+	info        os.FileInfo
+	offset      int64 // last completely decoded compressed frame boundary
+	state       deepSeekLogState
+	pending     map[string]struct{} // pending for the currently projected open turn
+	visibleTurn int
+	closed      bool
+	backfill    struct {
+		seq int
+		at  int64
+		end deepSeekTurnEnd
+	}
+}
+
+type deepSeekLogState struct {
+	turn          int // start of the latest turn
+	pending       map[string]struct{}
+	compact       deepSeekCompaction
+	ending, match deepSeekTurnEnd
 }
 
 const noDeepSeekTurn = -1
@@ -37,14 +49,14 @@ type deepSeekCompaction struct {
 }
 
 func (a *deepSeekLifecycle) compacting(now time.Time) bool {
-	return !a.compact.at.IsZero() && now.Sub(a.compact.at) < deepSeekCompactLifetime
+	return !a.state.compact.at.IsZero() && now.Sub(a.state.compact.at) < deepSeekCompactLifetime
 }
 
-func (a *deepSeekLifecycle) watch(home, session string, turn int) []string {
+func (a *deepSeekLifecycle) watch(home, session string, turn, terminal int) ([]string, deepSeekTurnEnd, bool) {
 	if a.path == "" {
 		groups, err := os.ReadDir(filepath.Join(home, "sessions"))
 		if err != nil {
-			return nil
+			return nil, deepSeekTurnEnd{}, false
 		}
 		for _, group := range groups {
 			if !group.IsDir() {
@@ -57,77 +69,107 @@ func (a *deepSeekLifecycle) watch(home, session string, turn int) []string {
 			}
 		}
 		if a.path == "" {
-			return nil
+			return nil, deepSeekTurnEnd{}, false
 		}
 	}
-	if a.turn != turn {
-		a.turn, a.info, a.offset, a.pending, a.closed, a.compact = turn, nil, 0, nil, false, deepSeekCompaction{}
-	}
-	n, _ := a.read()
-	return n
-}
 
-func (a *deepSeekLifecycle) read() ([]string, bool) {
-	f, err := os.Open(a.path)
-	if err != nil {
-		return nil, false
+	a.read(turn, terminal)
+	var oldPending map[string]struct{}
+	if turn == a.visibleTurn {
+		oldPending = a.pending
 	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, false
-	}
-	offset, pending, closed, compact := a.offset, a.pending, a.closed, a.compact
-	if a.info == nil || !os.SameFile(a.info, info) || info.Size() < offset ||
-		(info.Size() == offset && !info.ModTime().Equal(a.info.ModTime())) {
-		offset, pending, closed, compact = 0, nil, false, deepSeekCompaction{}
-	}
-	if info.Size() == offset {
-		if offset == 0 {
-			a.info, a.offset, a.pending, a.closed, a.compact = info, 0, nil, false, deepSeekCompaction{}
+	a.visibleTurn, a.pending, a.closed = turn, nil, false
+	if turn != noDeepSeekTurn {
+		a.closed = a.state.ending.Seq >= turn || a.state.turn > turn
+		if a.state.turn == turn && !a.closed {
+			a.pending = a.state.pending
 		}
-		return nil, true
-	}
-	// For closed, idle sessions with only old data, wait until the log is
-	// fresh before inflating it. No five-minute compaction can still be live.
-	if offset == 0 && a.turn == noDeepSeekTurn && time.Since(info.ModTime()) >= deepSeekCompactLifetime {
-		return nil, true
-	}
-	stream := io.NewSectionReader(f, offset, info.Size()-offset)
-	dec, err := zstd.NewReader(stream, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(16<<20))
-	if err != nil {
-		return nil, false
-	}
-	defer dec.Close()
-	next, closed, compact, ok := deepSeekLifecycleTail(dec, a.turn, maps.Clone(pending), closed, compact)
-	if !ok {
-		return nil, false // Writer may still be appending a frame. Retry from the same boundary.
 	}
 	var ids []string
-	for id := range next {
-		if _, known := a.pending[id]; !known {
+	for id := range a.pending {
+		if _, known := oldPending[id]; !known {
 			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)
-	a.info, a.offset, a.pending, a.closed, a.compact = info, info.Size(), next, closed, compact
-	return ids, true
+	if terminal <= 0 {
+		return ids, deepSeekTurnEnd{}, false
+	}
+	if e := a.state.ending; e.Seq == terminal {
+		return ids, e, true
+	}
+	if e := a.state.match; e.Seq == terminal {
+		return ids, e, true
+	}
+	if a.state.ending.Seq > terminal {
+		// Only a lagging projection can request a terminal older than the
+		// latest one already read. Look it up once per file position.
+		if a.backfill.seq != terminal || a.backfill.at != a.offset {
+			e, _ := readDeepSeekTurnEnd(a.path, terminal)
+			a.backfill.seq, a.backfill.at, a.backfill.end = terminal, a.offset, e
+		}
+		if e := a.backfill.end; e.Seq == terminal {
+			return ids, e, true
+		}
+	}
+	return ids, deepSeekTurnEnd{}, false
 }
 
-func deepSeekLifecycleTail(r io.Reader, turn int, pending map[string]struct{}, closed bool, compact deepSeekCompaction) (map[string]struct{}, bool, deepSeekCompaction, bool) {
+func (a *deepSeekLifecycle) read(turn, terminal int) {
+	f, err := os.Open(a.path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	offset, state := a.offset, a.state
+	if a.info == nil || !os.SameFile(a.info, info) || info.Size() < offset ||
+		(info.Size() == offset && !info.ModTime().Equal(a.info.ModTime())) {
+		offset, state = 0, deepSeekLogState{}
+		a.backfill.seq = 0
+	}
+	if info.Size() == offset {
+		a.info, a.offset, a.state = info, offset, state
+		return
+	}
+	// An old, closed log does not have any currently observable compaction.
+	if offset == 0 && turn == noDeepSeekTurn && terminal == 0 && time.Since(info.ModTime()) >= deepSeekCompactLifetime {
+		return
+	}
+	if state.turn == 0 && turn > state.ending.Seq {
+		state.turn = turn // the projection may already know the first open turn
+	}
+	stream := io.NewSectionReader(f, offset, info.Size()-offset)
+	dec, err := zstd.NewReader(stream, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(16<<20))
+	if err != nil {
+		return
+	}
+	defer dec.Close()
+	state.pending = maps.Clone(state.pending)
+	next, ok := deepSeekLifecycleTail(dec, state, terminal)
+	if ok {
+		a.info, a.offset, a.state = info, info.Size(), next
+	}
+	// An incomplete frame leaves the cursor unchanged until the writer flushes.
+}
+
+func deepSeekLifecycleTail(r io.Reader, state deepSeekLogState, terminal int) (deepSeekLogState, bool) {
 	br := bufio.NewReaderSize(r, 64<<10)
 	for {
 		line, err := br.ReadSlice('\n')
 		if errors.Is(err, bufio.ErrBufferFull) {
-			// Conversation and tool results may be large. Only small
-			// lifecycle records are projected out of the stream.
 			for errors.Is(err, bufio.ErrBufferFull) {
 				line, err = br.ReadSlice('\n')
 			}
 		} else if err == nil && (bytes.Contains(line, []byte(`"compaction/start"`)) ||
 			bytes.Contains(line, []byte(`"compaction/end"`)) ||
-			turn != noDeepSeekTurn && !closed && (bytes.Contains(line, []byte(`"approval/asked"`)) ||
-				bytes.Contains(line, []byte(`"approval/decided"`)) || bytes.Contains(line, []byte(`"turn/end"`)))) {
+			bytes.Contains(line, []byte(`"turn/start"`)) ||
+			bytes.Contains(line, []byte(`"turn/end"`)) ||
+			bytes.Contains(line, []byte(`"approval/asked"`)) ||
+			bytes.Contains(line, []byte(`"approval/decided"`))) {
 			var event struct {
 				Type string
 				Seq  int
@@ -141,35 +183,44 @@ func deepSeekLifecycleTail(r io.Reader, turn int, pending map[string]struct{}, c
 				switch event.Type {
 				case "compaction/start":
 					if event.Data.CompactionID != "" && event.Time > 0 {
-						compact = deepSeekCompaction{event.Data.CompactionID, time.UnixMilli(event.Time)}
+						state.compact = deepSeekCompaction{event.Data.CompactionID, time.UnixMilli(event.Time)}
 					}
 				case "compaction/end":
-					if compact.id == event.Data.CompactionID {
-						compact = deepSeekCompaction{}
+					if state.compact.id == event.Data.CompactionID {
+						state.compact = deepSeekCompaction{}
 					}
-				default:
-					if turn == noDeepSeekTurn || closed || event.Seq < turn {
+				case "turn/start":
+					if event.Seq >= state.turn {
+						state.turn, state.pending = event.Seq, nil
+					}
+				case "turn/end":
+					var ending deepSeekTurnEnd
+					if json.Unmarshal(line, &ending) == nil {
+						state.ending = ending
+						if ending.Seq == terminal {
+							state.match = ending
+						}
+					}
+					if event.Seq >= state.turn {
+						state.pending = nil
+					}
+				case "approval/asked", "approval/decided":
+					if state.turn == 0 || event.Seq < state.turn || state.ending.Seq >= state.turn {
 						break
 					}
-					switch event.Type {
-					case "approval/asked":
-						if event.Data.ID != "" {
-							if pending == nil {
-								pending = make(map[string]struct{})
-							}
-							pending[event.Data.ID] = struct{}{}
+					if event.Type == "approval/asked" && event.Data.ID != "" {
+						if state.pending == nil {
+							state.pending = make(map[string]struct{})
 						}
-					case "approval/decided":
-						delete(pending, event.Data.ID)
-					case "turn/end":
-						clear(pending)
-						closed = true // A stale projection cannot expose requests from a newer turn.
+						state.pending[event.Data.ID] = struct{}{}
+					} else {
+						delete(state.pending, event.Data.ID)
 					}
 				}
 			}
 		}
 		if err != nil {
-			return pending, closed, compact, err == io.EOF && len(line) == 0
+			return state, err == io.EOF && len(line) == 0
 		}
 	}
 }

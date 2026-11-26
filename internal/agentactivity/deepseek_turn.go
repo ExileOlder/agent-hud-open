@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -45,37 +44,18 @@ func findDeepSeekTurnEnd(r io.Reader, seq int) (deepSeekTurnEnd, bool) {
 	}
 }
 
-func readDeepSeekTurnEnd(home, session string, seq int) (deepSeekTurnEnd, bool) {
-	groups, err := os.ReadDir(filepath.Join(home, "sessions"))
+func readDeepSeekTurnEnd(path string, seq int) (deepSeekTurnEnd, bool) {
+	f, err := os.Open(path)
 	if err != nil {
 		return deepSeekTurnEnd{}, false
 	}
-	for _, group := range groups {
-		if !group.IsDir() {
-			continue
-		}
-		path := filepath.Join(home, "sessions", group.Name(), session, "session.v4.jsonl.zstd")
-		info, err := os.Stat(path)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		dec, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(16<<20))
-		var event deepSeekTurnEnd
-		found := false
-		if err == nil {
-			event, found = findDeepSeekTurnEnd(dec, seq)
-			dec.Close()
-		}
-		f.Close()
-		if found {
-			return event, true
-		}
+	defer f.Close()
+	dec, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(16<<20))
+	if err != nil {
+		return deepSeekTurnEnd{}, false
 	}
-	return deepSeekTurnEnd{}, false
+	defer dec.Close()
+	return findDeepSeekTurnEnd(dec, seq)
 }
 
 func (e deepSeekTurnEnd) successfulSince(start time.Time) bool {

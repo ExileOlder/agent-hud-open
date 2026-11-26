@@ -18,10 +18,10 @@ func TestDeepSeekCompactionMatchesIdentityAndExpires(t *testing.T) {
 {"type":"compaction/end","seq":8,"data":{"compactionId":"unrelated","turn":null}}
 {"type":"approval/asked","seq":9,"data":{"id":"not-in-a-turn"}}
 `, now.UnixMilli())
-	pending, closed, compact, ok := deepSeekLifecycleTail(strings.NewReader(rows), noDeepSeekTurn, nil, false, deepSeekCompaction{})
-	a := deepSeekLifecycle{compact: compact}
-	if !ok || closed || len(pending) != 0 || !a.compacting(now) || a.compacting(now.Add(deepSeekCompactLifetime)) {
-		t.Fatalf("manual compaction was folded incorrectly: %+v, pending=%v, closed=%t", compact, pending, closed)
+	state, ok := deepSeekLifecycleTail(strings.NewReader(rows), deepSeekLogState{}, 0)
+	a := deepSeekLifecycle{state: state}
+	if !ok || len(state.pending) != 0 || !a.compacting(now) || a.compacting(now.Add(deepSeekCompactLifetime)) {
+		t.Fatalf("manual compaction was folded incorrectly: %+v, pending=%v", state.compact, state.pending)
 	}
 }
 

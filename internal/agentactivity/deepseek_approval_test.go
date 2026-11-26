@@ -36,7 +36,8 @@ func TestDeepSeekPendingApprovalFollowsFlushedFrameBoundaries(t *testing.T) {
 	a := deepSeekLifecycle{path: path}
 	check := func(turn, new, pending int) {
 		t.Helper()
-		if got := len(a.watch("", "", turn)); got != new || len(a.pending) != pending {
+		ids, _, _ := a.watch("", "", turn, 0)
+		if got := len(ids); got != new || len(a.pending) != pending {
 			t.Fatalf("turn %d: got %d new, %d pending; want %d new, %d pending", turn, got, len(a.pending), new, pending)
 		}
 	}
