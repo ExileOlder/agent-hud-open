@@ -108,6 +108,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	var panel panelSettings
 	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 535, 176, 107, 49
 	notices := tools.notices
+	var work workingMarks
+	agyActivity := tools.antigravityActivity
 	var iconClick time.Time
 	lastSlot := -1
 	var area, frame rect
@@ -165,6 +167,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	labelFont, valueFont := font(400, 20), font(600, 20)
 	defer g("DeleteObject", labelFont)
 	defer g("DeleteObject", valueFont)
+	figureFont := font(400, 16)
+	defer g("DeleteObject", figureFont)
 	prefsFont := font(400, 15)
 	defer g("DeleteObject", prefsFont)
 	started := time.Now()
@@ -460,7 +464,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			return
 		}
 		now := time.Now()
-		frames, _ := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount())
+		frames, _ := work.frames(rows, now, started, hoverStart, hover, p)
 		barImage = paintBar(rows, p, frames, barImage)
 		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
 		info := struct {
@@ -473,6 +477,22 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		}{Size: 40, Width: int32(w), Height: -int32(h), Planes: 1, Bits: 32}
 		g("StretchDIBits", dc, 0, 0, uintptr(w), uintptr(h), 0, 0, uintptr(w), uintptr(h),
 			uintptr(unsafe.Pointer(&barImage.Pix[0])), uintptr(unsafe.Pointer(&info)), 0, 0x00cc0020)
+		if p.Numbers {
+			g("SelectObject", dc, figureFont)
+			_, _, step := barGeometry(p)
+			for i, r := range rows[:p.slotCount()] {
+				x, y := barPadding+i*step+barItem-2, barPadding+barItem/2-10
+				if p.Edge%2 != 0 {
+					x, y = barItem-2, barPadding+i*barItem+barItem/2-10
+				}
+				ink := quotaInks[r.quotaTone()]
+				rgb := uintptr(ink.R) | uintptr(ink.G)<<8 | uintptr(ink.B)<<16
+				if r.Percent < 0 {
+					rgb = 0xb5aea5
+				}
+				write(dc, int32(x), int32(y), r.Number, rgb)
+			}
+		}
 		if outlined {
 			pen := g("CreatePen", 1, 1, 0xf6f4f2) // PS_DASH
 			oldPen := g("SelectObject", dc, pen)
@@ -654,22 +674,35 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				u("PostQuitMessage", 0)
 				return 0
 			case completionMessage:
-				if wp > 0 && wp < uintptr(len(agentNames)) {
-					mail.receive(mailItem{agent: int(wp)}, time.Now(), !p.ReduceMotion)
-					renderMail(time.Now())
-				}
+				now := time.Now()
+				work.hook(decodeHook(int(wp), uint32(lp)), &mail.mailInbox, now, !p.ReduceMotion)
+				renderMail(now)
 				return 0
 			case 0x113: // WM_TIMER
 				now := time.Now()
-				frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount())
+				frames, active := work.frames(rows, now, started, hoverStart, hover, p)
 				if previousFrames != frames {
 					previousFrames = frames
 					invalidate(bar)
 				}
 				select {
+				case active, ok := <-agyActivity:
+					if ok {
+						work.updateAntigravity(active, time.Now())
+					} else {
+						agyActivity = nil
+					}
 				case event, ok := <-notices:
 					if ok {
-						mail.receive(mailItem{agent: 1, event: event}, now, !p.ReduceMotion)
+						if event.Activity {
+							if event.Working {
+								work.codex = now
+							} else {
+								work.codex = time.Time{}
+							}
+						} else {
+							mail.receive(mailItem{agent: 1, event: event}, now, !p.ReduceMotion)
+						}
 					} else {
 						notices = nil
 					}

@@ -21,8 +21,8 @@ import (
 	"unsafe"
 )
 
-func notifyCompletion(_ context.Context, id int) error {
-	if C.hud_post_completion(C.int(id)) != 0 {
+func notifyHook(_ context.Context, code int, session uint32) error {
+	if C.hud_post_completion(C.int(code), C.uint(session)) != 0 {
 		return nil
 	}
 	return errors.New("start Balance HUD before sending a completion reminder")
@@ -52,6 +52,9 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	C.hud_slots(h, C.int(p.slotCount()))
 	set := func(rows []row) {
 		for i, r := range rows {
+			n := C.CString(r.Number)
+			C.hud_number(h, C.int(i), n, C.int(r.quotaTone()))
+			C.free(unsafe.Pointer(n))
 			items := r.peekLine(i)
 			for j, cell := range items {
 				label, value := C.CString(cell.Label), C.CString(cell.Value)
@@ -101,6 +104,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	var mail mailInbox
 	revision := -1
 	notices := tools.notices
+	var work workingMarks
+	agyActivity := tools.antigravityActivity
 	renderMail := func(now time.Time) {
 		var n [8]C.int
 		C.hud_mail_bounds(h, &n[0])
@@ -177,10 +182,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				openProvider(completionSlot(item.agent), item.event.Thread)
 			}
 		case action >= 200:
-			agent := action - 200
-			if agent > 0 && agent < len(agentNames) {
-				mail.receive(mailItem{agent: agent}, time.Now(), !p.ReduceMotion)
-			}
+			event := decodeHook(action-200, uint32(C.hud_hook_session(h)))
+			work.hook(event, &mail, time.Now(), !p.ReduceMotion)
 		case action >= 100:
 			openProvider(action-100, "")
 		case action >= 20:
@@ -230,9 +233,23 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		default:
 		}
 		select {
+		case active, ok := <-agyActivity:
+			if ok {
+				work.updateAntigravity(active, time.Now())
+			} else {
+				agyActivity = nil
+			}
 		case event, ok := <-notices:
 			if ok {
-				mail.receive(mailItem{agent: 1, event: event}, time.Now(), !p.ReduceMotion)
+				if event.Activity {
+					if event.Working {
+						work.codex = time.Now()
+					} else {
+						work.codex = time.Time{}
+					}
+				} else {
+					mail.receive(mailItem{agent: 1, event: event}, time.Now(), !p.ReduceMotion)
+				}
 			} else {
 				notices = nil
 			}
@@ -247,7 +264,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		if hover != lastHover {
 			hoverStart, lastHover = now, hover
 		}
-		frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount())
+		frames, active := work.frames(rows, now, started, hoverStart, hover, p)
 		animating = active
 		if dirty || frames != previousFrames {
 			paint(frames)

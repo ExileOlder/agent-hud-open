@@ -5,7 +5,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 assets="$root/cmd/balance-hud/artwork"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-cp -r "$1/packages/hud/src/bots" "$tmp/bots"
+upstream="$1"
+shift
+if [[ $# == 0 ]]; then set -- hover idle claude-hover claude-idle work claude-work; fi
+cp -r "$upstream/packages/hud/src/bots" "$tmp/bots"
 cp "$root/scripts/record-hover.ts" "$tmp/record-hover.ts"
 "${ESBUILD:-esbuild}" "$tmp/record-hover.ts" --bundle "--outfile=$tmp/hover.js"
 python3 - "$assets" > "$tmp/hover.html" <<'PY'
@@ -17,12 +20,16 @@ for name in ("chatgpt", "antigravity", "deepseek", "claude"):
     print(f'<img hidden src="data:image/png;base64,{data}">')
 print('<script src="hover.js"></script>')
 PY
-for mode in hover idle claude-hover claude-idle; do
+for mode in "$@"; do
   query=""
   case "$mode" in
+    hover) :;;
     idle) query="?idle";;
+    work) query="?work";;
+    claude-work) query="?claude&work";;
     claude-hover) query="?claude";;
     claude-idle) query="?claude&idle";;
+    *) echo "Unknown animation atlas: $mode" >&2; exit 2;;
   esac
   "${BROWSER:-chromium}" --headless=new --disable-gpu --no-first-run --user-data-dir="$tmp/profile" \
     --virtual-time-budget=30000 --dump-dom "file://$tmp/hover.html$query" > "$tmp/dom.html"

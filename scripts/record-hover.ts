@@ -11,8 +11,10 @@ const cell = 80, side = 54, count = 40, columns = 8;
 const idleFPS = 16, idleCount = 88;
 const query = new URLSearchParams(location.search);
 const idle = query.has("idle");
+const work = query.has("work");
+const workFPS = 12, workCount = 48;
 const keys = query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
-const frames = idle ? idleCount : count;
+const frames = work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
 sheet.height = keys.length * frames / columns * cell;
@@ -38,7 +40,12 @@ async function record() {
     motion.set(botState({look: "idle"}), 0);
     motion.step(0);
     let start = 0, frameRate = 25;
-    if (idle) {
+    if (work) {
+      motion.set(botState({look: "thinking"}), 0);
+      frameRate = workFPS;
+      start = workFPS;
+      for (let i = 1; i < start; i++) motion.step(i / frameRate);
+    } else if (idle) {
       // Run the upstream visit state machine until the first real movement,
       // respecting its frame clock instead of approximating the motion curves.
       frameRate = idleFPS;

@@ -78,7 +78,7 @@ func main() {
 		if home != "" {
 			notices = codexnotice.Watch(ctx, home)
 		}
-		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, claude: *claude, notices: notices}); err != nil {
+		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, claude: *claude, notices: notices, antigravityActivity: watchAntigravity(ctx)}); err != nil {
 			println(err.Error())
 			os.Exit(1)
 		}

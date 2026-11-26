@@ -204,7 +204,7 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	wait("dock inbox did not open independently", func() bool { return visible(inbox) })
 	post(inbox, 0x202, 0, client(inbox).Right-18, 23)
 	wait("clear did not close badge and inbox", func() bool { return !visible(badge) && !visible(inbox) })
-	if err := notifyCompletion(ctx, 5); err != nil {
+	if err := notifyHook(ctx, 5, 0); err != nil {
 		t.Fatal(err)
 	}
 	wait("separate-process completion did not land", func() bool { return visible(badge) })

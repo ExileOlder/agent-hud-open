@@ -59,11 +59,8 @@ func read(path string) ([]Event, error) {
 	var out []Event
 	rc, _, _ = sqliteStep.Call(stmt)
 	for rc == 100 {
-		var e Event
-		e.Thread, e.ID = col(0), col(1)
 		v, _, _ := sqliteInt.Call(stmt, 2)
-		e.Question = v != 0
-		out = append(out, e)
+		out = append(out, projection(col(0), col(1), int(v)))
 		rc, _, _ = sqliteStep.Call(stmt)
 	}
 	if rc != 101 {

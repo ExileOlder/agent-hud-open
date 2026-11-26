@@ -25,3 +25,13 @@ func TestIdleVisitsRepeatWithoutPointer(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestWorkingAnimationPreemptsHoverAndIdle(t *testing.T) {
+	frames, active := motionFrames(time.Second, 0, 200*time.Millisecond, false, 4, 500*time.Millisecond, -1, 250*time.Millisecond)
+	if !active || frames != (markFrames{workBase + 6, 0, workBase + 3}) {
+		t.Fatalf("unexpected work frames: %v, active: %v", frames, active)
+	}
+	if frames, active = motionFrames(time.Second, 0, time.Second, true, 4, time.Second); active || frames != (markFrames{}) {
+		t.Fatalf("reduced motion: %v, active: %v", frames, active)
+	}
+}

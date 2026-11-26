@@ -11,10 +11,6 @@ import (
 	"sync"
 
 	imagedraw "golang.org/x/image/draw"
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/goregular"
-	"golang.org/x/image/font/opentype"
-	"golang.org/x/image/math/fixed"
 )
 
 //go:embed artwork/hover.png
@@ -29,6 +25,12 @@ var claudeIdlePNG []byte
 //go:embed artwork/idle.png
 var idlePNG []byte
 
+//go:embed artwork/work.png
+var workPNG []byte
+
+//go:embed artwork/claude-work.png
+var claudeWorkPNG []byte
+
 const (
 	barPadding     = 4
 	barItem        = 92
@@ -40,7 +42,6 @@ const (
 )
 
 var hoverAtlas image.Image
-var barFont font.Face
 
 // Every provider mark uses the same cell and target size. Reuse the
 // high-quality filter weights and its scratch buffer between animation frames.
@@ -49,6 +50,9 @@ var markScaler = imagedraw.CatmullRom.NewScaler(2*markRadius, 2*markRadius, hove
 var idleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(idlePNG) })
 var claudeHoverAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeHoverPNG) })
 var claudeIdleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeIdlePNG) })
+
+var workAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(workPNG) })
+var claudeWorkAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeWorkPNG) })
 
 func decodeAtlas(data []byte) image.Image {
 	img, err := png.Decode(bytes.NewReader(data))
@@ -60,13 +64,27 @@ func decodeAtlas(data []byte) image.Image {
 
 func init() {
 	hoverAtlas = decodeAtlas(hoverPNG)
-	parsed, e := opentype.Parse(goregular.TTF)
-	if e != nil {
-		panic(e)
-	}
-	barFont, e = opentype.NewFace(parsed, &opentype.FaceOptions{Size: 16, DPI: 72, Hinting: font.HintingFull})
-	if e != nil {
-		panic(e)
+}
+
+// Shared with the Xft percentage palette. The missing ring is dimmer than
+// its label; Windows also uses this table for GDI quota figures.
+var quotaInks = [...]color.RGBA{
+	{55, 66, 76, 255}, {135, 145, 154, 255}, {255, 104, 120, 255},
+	{255, 197, 94, 255}, {45, 217, 128, 255},
+}
+
+func (r row) quotaTone() int {
+	switch {
+	case r.Percent < 0:
+		return 0
+	case r.Stale:
+		return 1
+	case r.Percent <= 15:
+		return 2
+	case r.Percent <= 30:
+		return 3
+	default:
+		return 4
 	}
 }
 
@@ -99,19 +117,7 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 			left, top = 0, barPadding+i*barItem
 		}
 		cx, cy := left+barItem/2, top+barItem/2
-		q := color.RGBA{55, 66, 76, 255}
-		if r.Percent >= 0 {
-			switch {
-			case r.Stale:
-				q = color.RGBA{135, 145, 154, 255}
-			case r.Percent <= 15:
-				q = color.RGBA{255, 104, 120, 255}
-			case r.Percent <= 30:
-				q = color.RGBA{255, 197, 94, 255}
-			default:
-				q = color.RGBA{45, 217, 128, 255}
-			}
-		}
+		q := quotaInks[r.quotaTone()]
 
 		const radius, halfStroke = 28.5, 3.3
 		for yy := cy - 33; yy <= cy+33; yy++ {
@@ -136,7 +142,14 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		}
 		slot := [...]int{0, 1, 1, 2, 0}[i]
 		frame, count, atlas := frames[i], hoverFrames, hoverAtlas
-		if i == 4 {
+		if frame >= workBase {
+			frame, count = frame-workBase, workFrames
+			if i == 4 {
+				atlas = claudeWorkAtlas()
+			} else {
+				atlas = workAtlas()
+			}
+		} else if i == 4 {
 			atlas = claudeHoverAtlas()
 			if frame < 0 {
 				frame, count, atlas = -frame-1, idleFrames, claudeIdleAtlas()
@@ -148,14 +161,6 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		y := (slot*count/hoverColumns + frame/hoverColumns) * hoverCell
 		markScaler.Scale(dst, image.Rect(cx-markRadius, cy-markRadius, cx+markRadius, cy+markRadius),
 			atlas, image.Rect(x, y, x+hoverCell, y+hoverCell), draw.Over, nil)
-		if p.Numbers {
-			ink := q
-			if r.Percent < 0 {
-				ink = color.RGBA{165, 174, 181, 255}
-			}
-			d := font.Drawer{Dst: dst, Src: image.NewUniform(ink), Face: barFont, Dot: fixed.P(left+barItem-2, cy+6)}
-			d.DrawString(r.Number)
-		}
 	}
 	// The targets use little-endian 32-bit BGRX pixels.
 	for i := 0; i < len(dst.Pix); i += 4 {

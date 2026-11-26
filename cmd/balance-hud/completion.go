@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"strings"
 	"time"
@@ -43,12 +44,42 @@ func completionSlot(agent int) int {
 	}
 }
 
-// The hook payload can contain conversation text. Read only completion markers
-// and send only a fixed agent label to the desktop notifier.
-func completed(id int, r io.Reader) bool {
+// The local IPC carries only the provider, phase and an opaque session key.
+type hookPhase int
+
+const (
+	hookComplete hookPhase = iota
+	hookWork
+	hookWait
+	hookEnd
+)
+const hookPhaseStep = 8
+
+type hookEvent struct {
+	agent   int
+	phase   hookPhase
+	session uint32
+}
+
+func (e hookEvent) code() int { return e.agent + hookPhaseStep*int(e.phase) }
+func decodeHook(code int, session uint32) hookEvent {
+	agent, phase := code%hookPhaseStep, hookPhase(code/hookPhaseStep)
+	if agent <= 0 || agent >= len(agentNames) || phase < hookComplete || phase > hookEnd {
+		return hookEvent{}
+	}
+	if phase != hookComplete && ((agent != 3 && agent != 5) || session == 0) {
+		return hookEvent{}
+	}
+	return hookEvent{agent, phase, session}
+}
+
+func parseHook(id int, r io.Reader) hookEvent {
 	var event struct {
 		Event        string     `json:"hook_event_name"`
 		Notification string     `json:"notification_type"`
+		Session      string     `json:"session_id"`
+		Parent       string     `json:"parent_session_id"`
+		Tool         string     `json:"tool_name"`
 		StopReason   string     `json:"terminationReason"`
 		Idle         bool       `json:"fullyIdle"`
 		Error        string     `json:"error"`
@@ -56,19 +87,71 @@ func completed(id int, r io.Reader) bool {
 		Cron         []struct{} `json:"session_crons"`
 	}
 	if json.NewDecoder(io.LimitReader(r, 1<<20)).Decode(&event) != nil {
-		return false
+		return hookEvent{}
 	}
+	var session uint32
+	if event.Session != "" && (id == 3 || id == 5) {
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(event.Session))
+		session = h.Sum32()
+		if session == 0 {
+			session = 1
+		}
+	}
+	phase := hookComplete
 	switch id {
 	case 1:
-		return event.Event == "Stop"
+		if event.Event != "Stop" {
+			return hookEvent{}
+		}
 	case 2:
-		return event.Idle && event.Error == "" && (event.StopReason == "NO_TOOL_CALL" || event.StopReason == "model_stop")
+		if !event.Idle || event.Error != "" || (event.StopReason != "NO_TOOL_CALL" && event.StopReason != "model_stop") {
+			return hookEvent{}
+		}
 	case 3:
-		return event.Notification == "turn_completed"
+		if event.Parent != "" {
+			return hookEvent{}
+		}
+		switch event.Notification {
+		case "turn_completed":
+		case "turn_failed":
+			phase = hookEnd
+		case "approval_requested", "question_asked":
+			phase = hookWait
+		default:
+			switch event.Event {
+			case "pre_agent", "pre_llm", "post_tool":
+				phase = hookWork
+			case "session_end":
+				phase = hookEnd
+			default:
+				return hookEvent{}
+			}
+		}
 	case 5:
-		return event.Event == "Stop" && len(event.Background) == 0 && len(event.Cron) == 0
+		switch event.Event {
+		case "Stop":
+			if len(event.Background) > 0 || len(event.Cron) > 0 {
+				return hookEvent{}
+			}
+		case "UserPromptSubmit", "PostToolUse", "PostToolUseFailure":
+			phase = hookWork
+		case "PermissionRequest":
+			phase = hookWait
+		case "PreToolUse":
+			if event.Tool != "AskUserQuestion" {
+				return hookEvent{}
+			}
+			phase = hookWait
+		case "SessionEnd", "StopFailure":
+			phase = hookEnd
+		default:
+			return hookEvent{}
+		}
+	default:
+		return hookEvent{}
 	}
-	return false
+	return decodeHook(id+int(phase)*hookPhaseStep, session)
 }
 
 func runCompletion(name string, hook bool, input io.Reader, output io.Writer) error {
@@ -76,16 +159,18 @@ func runCompletion(name string, hook bool, input io.Reader, output io.Writer) er
 	if id == 0 {
 		return fmt.Errorf("unknown completion source: %s", name)
 	}
+	event := hookEvent{agent: id}
 	if hook {
 		// A failed notification must never stop a client turn or make it continue.
 		if id == 2 {
 			defer fmt.Fprintln(output, `{"decision":"stop"}`)
 		}
-		if !completed(id, input) {
+		event = parseHook(id, input)
+		if event.agent == 0 {
 			return nil
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	return notifyCompletion(ctx, id)
+	return notifyHook(ctx, event.code(), event.session)
 }

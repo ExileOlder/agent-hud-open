@@ -8,7 +8,7 @@ jobs:
   native:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +21,15 @@ jobs:
       - run: go test ./...
         env:
           BALANCE_HUD_GUI_SMOKE: ${{ runner.os == 'Windows' && '1' || '0' }}
-      - if: runner.os == 'Linux'
-        run: go build -trimpath -ldflags="-s -w" -o balance-hud ./cmd/balance-hud
-      - if: runner.os == 'Windows'
-        run: go build -trimpath -ldflags="-s -w -H windowsgui" -o balance-hud.exe ./cmd/balance-hud
+      - name: Build portable archive
+        shell: bash
+        run: bash scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BalanceHUD-${{ runner.os }}-x64
+          path: |
+            build/BalanceHUD-ubuntu-x64.tar.gz
+            build/BalanceHUD-windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

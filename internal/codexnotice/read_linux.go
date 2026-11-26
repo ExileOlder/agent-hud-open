@@ -38,11 +38,11 @@ func read(path string) ([]Event, error) {
 	var out []Event
 	rc = C.sqlite3_step(stmt)
 	for rc == C.SQLITE_ROW {
-		out = append(out, Event{
-			Thread:   C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_column_text(stmt, 0)))),
-			ID:       C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_column_text(stmt, 1)))),
-			Question: C.sqlite3_column_int(stmt, 2) != 0,
-		})
+		out = append(out, projection(
+			C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_column_text(stmt, 0)))),
+			C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_column_text(stmt, 1)))),
+			int(C.sqlite3_column_int(stmt, 2)),
+		))
 		rc = C.sqlite3_step(stmt)
 	}
 	if rc != C.SQLITE_DONE {

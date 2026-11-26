@@ -4,12 +4,13 @@ and the Mistral slot uses deepseek.png to match the previous local HUD's Vibe di
 The optional Claude Code slot uses the original claude.png and its separately loaded animation sheets.
 The marks retain their respective owners' branding; this is not an endorsement.
 
-Go Regular and the image/font library are from golang.org/x/image (see
-LICENSE-Go-image-font.txt). Only these visual assets are included; the original
-chat and remote components are not required.
+The image-scaling library is from golang.org/x/image (see
+LICENSE-Go-image-font.txt). HUD text uses native system fonts, as upstream
+does; the binary does not embed a font.
 
-`hover.png` and `idle.png` contain 25-fps hover and 16-fps idle frames
-generated with the original HUD's BotMotion and renderBot (Apache-2.0). To regenerate, point
+`hover.png`, `idle.png`, and `work.png` contain 25-fps hover, 16-fps idle,
+and 12-fps thinking frames rendered with the original HUD’s BotMotion and
+renderBot (Apache-2.0). Claude Code uses separate atlases from the same recorder. To regenerate, point
 `ESBUILD=esbuild BROWSER=chromium ./scripts/record-hover.sh /path/to/upstream/src`
 at the Agent HUD source containing `packages/hud/src/bots`. The native app
 plays the hover sequence once and holds its final frame until the pointer leaves.

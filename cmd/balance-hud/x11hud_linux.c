@@ -20,10 +20,13 @@ struct Hud {
     Display *d;
     Window root, bar, tip, prefs, notice, mail_panel, paper;
     Atom wm_delete, opacity, completion;
+    unsigned int hook_session;
     GC gc;
     XftFont *font, *heading, *prefs_font, *notice_font;
-    XftDraw *tip_draw, *prefs_draw, *notice_draw, *mail_draw;
-    XftColor text_color, muted_text, tones[4];
+    XftDraw *tip_draw, *prefs_draw, *notice_draw, *mail_draw, *bar_draw;
+    XftColor text_color, muted_text, tones[4], number_ink[5];
+    char figures[slots][16];
+    int figure_tone[slots];
     Pixmap bitmap;
     int bw, bh, visible_slots;
     int tip_x, tip_y, tip_w, tip_h, motion;
@@ -139,12 +142,18 @@ static void draw(Hud *h) {
     XDrawLines(h->d,h->bar,h->gc,path,n,CoordModeOrigin);
     XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
 }
+void hud_number(Hud *h,int i,const char *number,int tone){
+    if(i<0||i>=slots)return;
+    snprintf(h->figures[i],sizeof(h->figures[i]),"%s",number);
+    h->figure_tone[i]=clamp(tone,0,4);
+}
 void hud_bitmap(Hud *h,int w,int height,const unsigned char *pixels){
     if(w!=h->w||height!=h->height)return;
     if(!h->bitmap||h->bw!=w||h->bh!=height){
         if(h->bitmap)XFreePixmap(h->d,h->bitmap);
         h->bitmap=XCreatePixmap(h->d,h->bar,w,height,DefaultDepth(h->d,DefaultScreen(h->d)));
         h->bw=w;h->bh=height;
+        XftDrawChange(h->bar_draw,h->bitmap);
     }
     XImage *img=XCreateImage(h->d,DefaultVisual(h->d,DefaultScreen(h->d)),
         DefaultDepth(h->d,DefaultScreen(h->d)),ZPixmap,0,(char *)pixels,w,height,32,w*4);
@@ -158,6 +167,13 @@ void hud_bitmap(Hud *h,int w,int height,const unsigned char *pixels){
         return;
     }
     img->data=NULL;XDestroyImage(img);
+    if(h->numbers)for(int i=0;i<h->visible_slots;i++){
+        int x=(vertical(h)?0:pad+i*step(h))+item-2;
+        int y=pad+(vertical(h)?i*item:0)+item/2+
+            (h->prefs_font->ascent-h->prefs_font->descent)/2;
+        XftDrawStringUtf8(h->bar_draw,&h->number_ink[h->figure_tone[i]],h->prefs_font,
+            x,y,(const FcChar8*)h->figures[i],strlen(h->figures[i]));
+    }
     draw(h);XFlush(h->d);
 }
 static void place(Hud *h) {
@@ -567,8 +583,9 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     h->mail_ring=color(h,"#74787b",h->fg);
     h->mail_blue=color(h,"#7eaaff",h->fg);
     h->prefs_font=XftFontOpenName(d,screen,"sans:pixelsize=16");
-    h->heading=XftFontOpenName(d,screen,"sans:bold:pixelsize=21");
+    h->heading=XftFontOpenName(d,screen,"sans:weight=demibold:pixelsize=21");
     h->tip_draw=XftDrawCreate(d,h->tip,visual,cmap);
+    h->bar_draw=XftDrawCreate(d,h->bar,visual,cmap);
     h->card_bg=color(h,"#242629",h->bg);h->side_bg=color(h,"#1a1c1f",h->bg);
     h->selected_bg=color(h,"#225da3",h->bg);
     h->prefs=XCreateSimpleWindow(d,h->root,0,0,prefs_w,prefs_h,0,h->bg,h->card_bg);
@@ -581,19 +598,21 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
     XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
     h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
-    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw||!h->notice_draw||!h->notice_font||!h->mail_draw){hud_close(h);return NULL;}
+    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw||!h->notice_draw||!h->notice_font||!h->mail_draw||!h->bar_draw){hud_close(h);return NULL;}
     XftColorAllocName(d,visual,cmap,"#f2f4f6",&h->text_color);
     XftColorAllocName(d,visual,cmap,"#878787",&h->muted_text);
     const char *ink[]={"#f2f4f6","#2dd980","#ffc55e","#ff6878"};
     for(int i=0;i<4;i++) XftColorAllocName(d,visual,cmap,ink[i],&h->tones[i]);
+    const char *figures[]={"#a5aeb5","#87919a","#ff6878","#ffc55e","#2dd980"};
+    for(int i=0;i<5;i++)XftColorAllocName(d,visual,cmap,figures[i],&h->number_ink[i]);
     place(h);
     XMapRaised(d,h->bar);
     XSetSelectionOwner(d,h->completion,h->bar,CurrentTime);
     XFlush(d);
     return h;
 }
-// Local X11 IPC: one integer, no identity or conversation data.
-int hud_post_completion(int agent) {
+// Local X11 IPC: lifecycle code and opaque local session key.
+int hud_post_completion(int code,unsigned int session) {
     Display *d=XOpenDisplay(NULL);
     if(!d)return 0;
     Atom message=XInternAtom(d,"_BALANCE_HUD_COMPLETION",True);
@@ -604,13 +623,17 @@ int hud_post_completion(int agent) {
     e.xclient.window=owner;
     e.xclient.message_type=message;
     e.xclient.format=32;
-    e.xclient.data.l[0]=agent;
+    e.xclient.data.l[0]=code;
+    e.xclient.data.l[1]=(long)session;
     int ok=XSendEvent(d,owner,False,NoEventMask,&e);
     XCloseDisplay(d);
     return ok!=0;
 }
 
+unsigned int hud_hook_session(Hud *h){return h->hook_session;}
+
 void hud_close(Hud *h) {
+    if(h->bar_draw)XftDrawDestroy(h->bar_draw);
     if(h->bitmap)XFreePixmap(h->d,h->bitmap);
     if(h->mail_draw)XftDrawDestroy(h->mail_draw);
     if(h->notice_draw)XftDrawDestroy(h->notice_draw);
@@ -696,8 +719,11 @@ int hud_step(Hud *h,int timeout) {
         }
         if(e.type==ClientMessage && e.xclient.window==h->bar &&
            e.xclient.message_type==h->completion && e.xclient.format==32){
-            long agent=e.xclient.data.l[0];
-            if(agent>=1&&agent<=5)return 200+(int)agent;
+            long code=e.xclient.data.l[0];
+            if(code>=1&&code<32){
+                h->hook_session=(unsigned int)e.xclient.data.l[1];
+                return 200+(int)code;
+            }
             continue;
         }
         switch(e.type){

@@ -8,6 +8,7 @@ int hud_edge(Hud *h);
 double hud_offset(Hud *h);
 int hud_numbers(Hud *h);
 
+void hud_number(Hud *,int,const char *,int);
 void hud_bitmap(Hud *,int,int,const unsigned char *);
 int hud_hover(Hud *);
 
@@ -16,7 +17,8 @@ void hud_settings_sync(Hud *,int,int,const char *);
 void hud_settings_show(Hud *);
 void hud_appearance(Hud *,int,double,int,int);
 
-int hud_post_completion(int);
+int hud_post_completion(int,unsigned int);
+unsigned int hud_hook_session(Hud *);
 
 void hud_slots(Hud *,int);
 

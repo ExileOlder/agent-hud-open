@@ -10,8 +10,9 @@ import (
 )
 
 type settingsTools struct {
-	codex, agy, claude string
-	notices            <-chan codexnotice.Event
+	codex, agy, claude  string
+	notices             <-chan codexnotice.Event
+	antigravityActivity <-chan map[string]bool
 }
 type settingsItem struct{ title, value string }
 type panelSettings struct {

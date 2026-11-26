@@ -11,7 +11,7 @@ git apply --check "$root/scripts/agy-monitor.patch"
 git apply "$root/scripts/agy-monitor.patch"
 os=${GOOS:-$(go env GOOS)}
 arch=${GOARCH:-$(go env GOARCH)}
-out="$root/build/$os-$arch"
+out="${BALANCE_HUD_MONITOR_OUT:-$root/build/$os-$arch}"
 mkdir -p "$out"
 name=agy-auth-monitor
 if [ "$os" = windows ]; then name="$name.exe"; fi

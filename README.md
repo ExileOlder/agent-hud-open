@@ -2,6 +2,12 @@
 
 A quota-focused rewrite of [Agent HUD](https://github.com/jazzenchen/agent-hud-open) for Ubuntu/X11 and Windows x64. It has no WebView, tray framework, session indexing, agent messaging, remote access or telemetry.
 
+## Get the portable build
+
+Open a successful [Native builds and tests](https://github.com/ExileOlder/agent-hud-open/actions/workflows/check.yml?branch=codex/balance-hud) run and download the artifact for your system. Extract the archive inside it. Run `BalanceHUD.exe` on Windows x64 or `./balance-hud` from an Ubuntu/X11 session. Keep the Antigravity quota helper beside the HUD executable. On Ubuntu, the application links to X11, XRandR, Xext, Xft and SQLite; on Ubuntu 22.04 their runtime packages are `libx11-6 libxrandr2 libxext6 libxft2 libsqlite3-0`. Connect the account sources below after extraction.
+
+The archive contains no local settings, API keys or authorized accounts.
+
 ## Build
 
 Use Go 1.24 or later.
@@ -9,6 +15,7 @@ Use Go 1.24 or later.
 - **Ubuntu/X11**: install the C compiler, pkg-config, libx11-dev, libxrandr-dev, libxext-dev, libxft-dev and libsqlite3-dev. Run `CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o build/balance-hud ./cmd/balance-hud`.
 - **Windows x64**: run `go build -trimpath -ldflags="-s -w -H windowsgui" -o build/balance-hud.exe ./cmd/balance-hud` on Windows, or set `GOOS=windows GOARCH=amd64 CGO_ENABLED=0` to cross-compile from Linux. This build requires native testing on Windows.
 - Run `go test ./...` to test quota decoding and display projection. Tests use fictional accounts.
+- Run `bash scripts/package.sh` on the target platform to build the same archive as CI, including the separate Antigravity helper. This requires Git and Python in addition to the build dependencies above.
 
 ## Connect quota sources
 
@@ -78,23 +85,50 @@ For automatic reminders, add just the indicated completion hook to each client y
   {"balance-hud":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed antigravity -hook","timeout":5}]}]}}
   ```
 
-- **[Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/hooks):** add a `turn_completed` notification hook to `~/.vibe/hooks.toml` (or the active Vibe home). The Vibe subscription alone does not provide turn callbacks.
+- **[Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/hooks):** merge the three entries below into `~/.vibe/hooks.toml` (or the active Vibe home). Replace the old Balance HUD `turn_completed` entry to avoid duplicate reminders. The Vibe subscription provides quota; task events come from the CLI.
 
   ```toml
   [[hooks]]
-  name = "balance-hud-completion"
+  name = "balance-hud-work"
+  type = "pre_llm"
+  command = "'/path/to/balance-hud' -completed mistral -hook"
+  timeout = 5
+
+  [[hooks]]
+  name = "balance-hud-notices"
   type = "notification"
-  match = "turn_completed"
+  match = "re:approval_requested|question_asked|turn_completed|turn_failed"
+  command = "'/path/to/balance-hud' -completed mistral -hook"
+  timeout = 5
+
+  [[hooks]]
+  name = "balance-hud-end"
+  type = "session_end"
   command = "'/path/to/balance-hud' -completed mistral -hook"
   timeout = 5
   ```
 
-- **[Claude Code](https://code.claude.com/docs/en/hooks#stop):** add the handler under `hooks.Stop` in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`. Balance HUD reports finished turns and skips stops with active background tasks or scheduled work.
+- **[Claude Code](https://code.claude.com/docs/en/hooks):** in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`, use the same command handler for `Stop`, `StopFailure`, `SessionEnd`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, and `PostToolUseFailure`. Also add the handler under `PreToolUse` with the matcher `AskUserQuestion`. Retain one Balance HUD entry per event and leave other client hooks in place. Example group for `PreToolUse`:
 
   ```json
-  {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed claude -hook","timeout":5}]}]}}
+  {"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed claude -hook","timeout":5}]}
   ```
+
+  Keep `Stop` for completion only if you do not want working animations or waiting reminders. Claude reports a finish only once background and scheduled work are clear.
+
+### Match Antigravity activity to its quota account
+
+For separate Antigravity profiles, create `BalanceHUD/activity-antigravity.json` in the OS user configuration directory. Each entry pairs the label displayed in the HUD’s Accounts page with the absolute path to that client profile’s `.gemini` directory. The association follows the account when you reorder positions. Restart Balance HUD after changing the file.
+
+```json
+[
+  {"Account":"first@example.test","GeminiHome":"/home/me/.gemini"},
+  {"Account":"second@example.test","GeminiHome":"/home/me/other-profile/.gemini"}
+]
+```
+
+On Windows use the same fields with absolute Windows paths (JSON accepts forward slashes). Balance HUD uses Antigravity’s recent transcript lifecycle fields for activity and does not display or store transcript contents. Quota refresh and completion hooks continue to work without this mapping.
 
 Other clients with a success-only hook can call `balance-hud -completed agent`. In Windows PowerShell commands use `& 'C:/path/to/BalanceHUD.exe' -completed codex -hook` (substitute the client name); in Git Bash use `'C:/path/to/BalanceHUD.exe'` without `&`. This program does not change agent configurations for you.
 
-The marks use the original Agent HUD artwork. The original character renderer supplies both the hover sequence and the occasional idle visit. The native HUD draws changing frames only while a sequence plays, without loading a WebView. Use **Turn off animation** for static marks. To regenerate the atlas from the matching upstream source, see [artwork notes](cmd/balance-hud/artwork/NOTICE.md).
+The marks use the original Agent HUD artwork. The original character renderer supplies the hover sequence, occasional idle visit, and thinking pose. The native HUD draws changing frames only while a sequence plays, without loading a WebView. Use **Turn off animation** for static marks. To regenerate the atlas from the matching upstream source, see [artwork notes](cmd/balance-hud/artwork/NOTICE.md).
