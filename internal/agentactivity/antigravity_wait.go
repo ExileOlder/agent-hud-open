@@ -40,77 +40,136 @@ const antigravityReadPath = antigravityServicePath + "GetAllCascadeTrajectories"
 const antigravityIdentityPath = antigravityServicePath + "GetUserStatus"
 const antigravityMetadata = `{"metadata":{"ideName":"antigravity","extensionName":"antigravity","locale":"en","ideVersion":"unknown"}}`
 
-func decodeAntigravityWaits(r io.Reader) ([]AntigravityWait, error) {
-	var body *struct {
-		Summaries map[string]struct {
-			Waiting []struct {
-				Index *uint32 `json:"stepIndex"`
-				Step  struct {
-					Status   json.RawMessage
-					Metadata struct {
-						Execution string `json:"executionId"`
-						Source    struct {
-							Cascade    string `json:"cascadeId"`
-							Trajectory string `json:"trajectoryId"`
-							Index      uint32 `json:"stepIndex"`
-						} `json:"sourceTrajectoryStepInfo"`
-					}
-					Interaction struct {
-						Permission *struct {
-							Resource struct{ Action, Target string }
-						}
-						Question *struct {
-							Questions []struct{ Question string }
-						} `json:"askQuestion"`
-						QuestionSnake *struct {
-							Questions []struct{ Question string }
-						} `json:"ask_question"`
-					} `json:"requestedInteraction"`
+type antigravityWaitingSummary struct {
+	Waiting []struct {
+		Index *uint32 `json:"stepIndex"`
+		Step  struct {
+			Status   json.RawMessage
+			Metadata struct {
+				Execution string `json:"executionId"`
+				Source    struct {
+					Cascade    string `json:"cascadeId"`
+					Trajectory string `json:"trajectoryId"`
+					Index      uint32 `json:"stepIndex"`
+				} `json:"sourceTrajectoryStepInfo"`
+			}
+			Interaction struct {
+				Permission *struct {
+					Resource struct{ Action, Target string }
 				}
-			} `json:"waitingSteps"`
-		} `json:"trajectorySummaries"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r, 8<<20)).Decode(&body); err != nil {
+				Question *struct {
+					Questions []struct{ Question string }
+				} `json:"askQuestion"`
+				QuestionSnake *struct {
+					Questions []struct{ Question string }
+				} `json:"ask_question"`
+			} `json:"requestedInteraction"`
+		}
+	} `json:"waitingSteps"`
+}
+
+// The endpoint includes historical cascades even when nothing is waiting.
+// Decode one summary at a time so the JSON buffer does not grow with history.
+func decodeAntigravityWaits(r io.Reader) ([]AntigravityWait, error) {
+	dec := json.NewDecoder(io.LimitReader(r, 8<<20))
+	open, err := dec.Token()
+	if err != nil {
 		return nil, err
 	}
-	if body == nil {
+	if open != json.Delim('{') {
 		return nil, errors.New("invalid Antigravity request summary")
 	}
+	pending := map[string][]AntigravityWait{}
+	for dec.More() {
+		field, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(field.(string), "trajectorySummaries") {
+			if err := dec.Decode(&ignoreAntigravityField{}); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		open, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if open == nil {
+			clear(pending)
+			continue
+		}
+		if open != json.Delim('{') {
+			return nil, errors.New("invalid Antigravity cascade summaries")
+		}
+		for dec.More() {
+			key, err := dec.Token()
+			if err != nil {
+				return nil, err
+			}
+			var summary antigravityWaitingSummary
+			if err := dec.Decode(&summary); err != nil {
+				return nil, err
+			}
+			cascade := key.(string)
+			if waits := pendingAntigravityWaits(cascade, summary); len(waits) > 0 {
+				pending[cascade] = waits
+			} else {
+				delete(pending, cascade)
+			}
+		}
+		if _, err := dec.Token(); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
 	var waits []AntigravityWait
-	for cascade, summary := range body.Summaries {
-		for _, entry := range summary.Waiting {
-			step := entry.Step
-			source := step.Metadata.Source
-			if string(step.Status) != `"CORTEX_STEP_STATUS_WAITING"` && string(step.Status) != "9" {
-				continue
+	for _, list := range pending {
+		waits = append(waits, list...)
+	}
+	return waits, nil
+}
+
+type ignoreAntigravityField struct{}
+
+func (*ignoreAntigravityField) UnmarshalJSON([]byte) error { return nil }
+
+func pendingAntigravityWaits(cascade string, summary antigravityWaitingSummary) []AntigravityWait {
+	var waits []AntigravityWait
+	for _, entry := range summary.Waiting {
+		step := entry.Step
+		source := step.Metadata.Source
+		if string(step.Status) != `"CORTEX_STEP_STATUS_WAITING"` && string(step.Status) != "9" {
+			continue
+		}
+		if cascade == "" || source.Trajectory == "" || source.Cascade != "" && source.Cascade != cascade ||
+			entry.Index != nil && *entry.Index != source.Index {
+			continue
+		}
+		wait := AntigravityWait{"", cascade, source.Trajectory, step.Metadata.Execution, source.Index, false}
+		if p := step.Interaction.Permission; p != nil {
+			if strings.TrimSpace(p.Resource.Action) != "" && strings.TrimSpace(p.Resource.Target) != "" {
+				wait.Permission = true
+				waits = append(waits, wait)
 			}
-			if cascade == "" || source.Trajectory == "" || source.Cascade != "" && source.Cascade != cascade ||
-				entry.Index != nil && *entry.Index != source.Index {
-				continue
-			}
-			wait := AntigravityWait{"", cascade, source.Trajectory, step.Metadata.Execution, source.Index, false}
-			if p := step.Interaction.Permission; p != nil {
-				if strings.TrimSpace(p.Resource.Action) != "" && strings.TrimSpace(p.Resource.Target) != "" {
-					wait.Permission = true
+			continue
+		}
+		q := step.Interaction.Question
+		if q == nil {
+			q = step.Interaction.QuestionSnake
+		}
+		if q != nil {
+			for _, item := range q.Questions {
+				if strings.TrimSpace(item.Question) != "" {
 					waits = append(waits, wait)
-				}
-				continue
-			}
-			q := step.Interaction.Question
-			if q == nil {
-				q = step.Interaction.QuestionSnake
-			}
-			if q != nil {
-				for _, item := range q.Questions {
-					if strings.TrimSpace(item.Question) != "" {
-						waits = append(waits, wait)
-						break
-					}
+					break
 				}
 			}
 		}
 	}
-	return waits, nil
+	return waits
 }
 
 var antigravityDataDirs = [...]string{"antigravity", "antigravity-cli", "antigravity-ide"}
