@@ -25,7 +25,7 @@ const lookHandoff = 300 * time.Millisecond
 
 func workLookForFrame(frame int) int {
 	switch {
-	case frame >= workBase && frame < toolBase:
+	case frame >= workBase && frame < toolBase || frame >= wakeBase:
 		return 1
 	case frame >= compactBase && frame < cueBase:
 		return 6

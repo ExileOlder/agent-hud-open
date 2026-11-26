@@ -12,6 +12,7 @@ const tool = query.get("tool") as BotLook | null;
 const cue = query.get("cue") as BotLook | null;
 const compacting = query.has("compact");
 const logos = query.has("logos");
+const wake = query.has("wake");
 const compact = tool || cue || compacting;
 const cell = compact ? 64 : 80, side = compact ? 43 : 54, count = 96, columns = 8;
 const idleFPS = 16, idleCount = 88;
@@ -21,9 +22,9 @@ const work = query.has("work");
 const workFPS = 6, workCount = 104; // contiguous entrance + first steady cycle; final tile is held thinking
 const toolFPS = 8, toolCount = 40; // 4.5s: 3s of beats, 1.5s of rest
 const doneCount = 40;
-const keys = compacting ? ["openai", "deepseek", "claude"] : compact || asleep || logos ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
+const keys = compacting ? ["openai", "deepseek", "claude"] : compact || asleep || logos || wake ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
 const wait = cue === "question" || cue === "permission";
-const frames = logos ? columns : compacting ? 32 : wait ? 40 : cue ? doneCount : tool ? toolCount : work ? workCount : idle ? idleCount : count;
+const frames = logos ? columns : wake ? 24 : compacting ? 32 : wait ? 40 : cue ? doneCount : tool ? toolCount : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
 sheet.height = keys.length * frames / columns * cell;
@@ -56,6 +57,11 @@ async function record() {
       for (let i = 1; i <= start; i++) motion.step(i / frameRate);
       motion.set(botState({look: cue}), start / frameRate);
       lastSample = start / frameRate;
+    } else if (wake) {
+      motion.set(botState({look: "thinking"}), 0);
+      motion.play("start", 0);
+      // Before the hop the standard work sheet already has the entrance.
+      start = 11;
     } else if (compacting) {
       motion.set(botState({look: "compacting"}), 0);
       frameRate = 8;
@@ -79,7 +85,7 @@ async function record() {
       motion.set(botState({look: "idle", hovered: true}), 0);
     }
     const scratch = document.createElement("canvas");
-    for (let i = 0; i < (logos ? 1 : frames); i++) {
+    for (let i = 0; i < (logos ? 1 : wake && key !== "claude" ? 8 : frames); i++) {
       // 24 entrance frames; the two following 8-frame groups sample the
       // alternating repeat movements at 3.8s and 6.4s from BotMoves.
       const age = wait && i >= 24

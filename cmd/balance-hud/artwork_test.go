@@ -17,6 +17,7 @@ func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 		{"idle", sheetIdle, 3, idleFrames},
 		{"asleep", sheetSleep, 4, idleFrames},
 		{"work", sheetWork, 3, workFrames},
+		{"start after rest", sheetWake, 4, wakeFrames},
 		{"Claude hover", sheetClaudeHover, 1, hoverFrames},
 		{"Claude idle", sheetClaudeIdle, 1, idleFrames},
 		{"Claude work", sheetClaudeWork, 1, workFrames},

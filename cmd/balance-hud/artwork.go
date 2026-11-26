@@ -29,6 +29,9 @@ var idleData []byte
 //go:embed artwork/sleep.atlas
 var sleepData []byte
 
+//go:embed artwork/wake.atlas
+var wakeData []byte
+
 //go:embed artwork/work.atlas
 var workData []byte
 

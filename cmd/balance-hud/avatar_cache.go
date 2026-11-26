@@ -23,13 +23,14 @@ const (
 	sheetDone
 	sheetSleep
 	sheetCompact
+	sheetWake
 	sheetCount
 )
 
 var avatarData = [sheetCount][]byte{
 	hoverData, idleData, workData,
 	claudeHoverData, claudeIdleData, claudeWorkData,
-	toolData, cueQuestionData, cuePermissionData, cueDoneData, sleepData, compactData,
+	toolData, cueQuestionData, cuePermissionData, cueDoneData, sleepData, compactData, wakeData,
 }
 
 const avatarIdleRetention = 2 * time.Minute
@@ -101,6 +102,8 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 	}
 	sheet := sheetHover
 	switch {
+	case frame >= wakeBase:
+		frame, sheet = frame-wakeBase, sheetWake
 	case frame >= pendingBase:
 		sheet = sheetQuestion + avatarSheet((frame-pendingBase)/waitAtlasFrames)
 		frame = (frame - pendingBase) % waitAtlasFrames

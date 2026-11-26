@@ -30,6 +30,9 @@ ease-out for working-look changes and interpolates only the character pixels;
 the quota ring and text stay fixed. Work and waiting poses return to their logos
 over the original 500 ms morph interval. The compaction frames use the original
 `compacting` look for Codex, Deepseek and Claude Code's procedural mark.
+The separate wake sheet records the original start gesture from BotMotion.
+It plays once when a new thinking turn follows five quiet minutes; an
+existing working turn is drawn without replaying the start gesture.
 The compact peek is a native adaptation of the Simple dock's AgentPeek layout.
 
 The `tool.atlas` atlas samples the same Apache-2.0 procedural renderer used above.

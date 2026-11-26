@@ -162,7 +162,7 @@ func (m *mailInbox) cueFrames(now time.Time, p placement, rows []row, frames mar
 			}
 			continue
 		}
-		if frames[i] >= pendingBase || (cue.look == cueDone && frames[i] >= workBase) {
+		if frames[i] >= pendingBase && frames[i] < wakeBase || (cue.look == cueDone && frames[i] >= workBase) {
 			continue
 		}
 		frames[i] = cueBase + int(cue.look)*cueFrames + frame

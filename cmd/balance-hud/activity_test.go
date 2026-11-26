@@ -234,3 +234,52 @@ func TestReturningFromAttentionAppliesTheCurrentWorkImmediately(t *testing.T) {
 		t.Fatal("resolving a request re-used the old tool look:", reading)
 	}
 }
+
+func TestFreshThinkingAfterRestPlaysOneWakeForEachActiveMark(t *testing.T) {
+	start := time.Now()
+	now := start.Add(hudWakeAfter + time.Second)
+	rows := view(nil)
+	rows[1].Identity, rows[2].Identity = "idle@example.test", "working@example.test"
+	var w workingMarks
+	var inbox mailInbox
+	w.rest[1].identity, w.rest[2].identity = rows[1].Identity, rows[2].Identity
+	w.updateCodex(codexnotice.Event{Working: true}, &inbox, now)
+	w.updateAntigravity(map[string]agentactivity.Tool{rows[2].Identity: agentactivity.Think}, now)
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Running: true}, &inbox, now, true)
+	w.hook(hookEvent{agent: 5, phase: hookWork, session: 5}, &inbox, now, true)
+	frame := func(t time.Time) markFrames {
+		f, _ := w.frames(rows, t, start, start, -1, placement{ShowClaude: true})
+		return f
+	}
+	if got := frame(now); !w.waking(placement{ShowClaude: true}) || got[0] != workBase || got[1] != 0 {
+		t.Fatalf("new work did not start with the usual morph: %v", got)
+	}
+	if got := frame(now.Add(wakeLead)); got != (markFrames{wakeBase, 0, wakeBase, wakeBase, wakeBase}) {
+		t.Fatalf("wake missed its actual provider or leaked to the first Antigravity account: %v", got)
+	}
+	w.updateCodex(codexnotice.Event{Working: true, Pending: true}, &inbox, now.Add(500*time.Millisecond))
+	if got := frame(now.Add(550 * time.Millisecond)); got[0] < pendingBase || got[0] >= wakeBase {
+		t.Fatalf("permission did not take over from wake: %v", got)
+	}
+	w.updateCodex(codexnotice.Event{Working: true}, &inbox, now.Add(600*time.Millisecond))
+	if got := frame(now.Add(time.Second)); got[0] >= wakeBase || got[2] >= wakeBase || got[3] >= wakeBase || got[4] < wakeBase {
+		t.Fatalf("only the longer limbed gesture should still be playing: %v", got)
+	}
+	if got := frame(now.Add(2 * time.Second)); w.waking(placement{ShowClaude: true}) || got[4] >= wakeBase || len(inbox.items)+len(inbox.queue) != 0 {
+		t.Fatalf("work gesture looped or created a notice: %v", got)
+	}
+}
+
+func TestWakeIgnoresStartupSnapshotsAndShortStops(t *testing.T) {
+	at := time.Now()
+	var r markRest
+	r.observeWork(at.Add(3*time.Hour), at, 4*time.Hour)
+	if !r.wakeAt.IsZero() {
+		t.Fatal("work already running at startup would replay its start")
+	}
+	r.observeWork(at.Add(3*time.Hour+time.Second), at, -1)
+	r.observeWork(at.Add(3*time.Hour+2*time.Second), at, 0)
+	if !r.wakeAt.IsZero() {
+		t.Fatal("a brief stop would replay the start")
+	}
+}

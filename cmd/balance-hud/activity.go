@@ -284,6 +284,15 @@ func (w *workingMarks) ages(rows []row, now time.Time) [5]time.Duration {
 		workAge(now, w.agy[strings.ToLower(rows[2].Identity)].started), max(workAge(now, w.deepSeek), workAge(now, w.deepSeekCompact), hookAge(now, w.hooks[0])), hookAge(now, w.hooks[1])}
 }
 
+func (w *workingMarks) waking(p placement) bool {
+	for _, rest := range w.rest[:p.slotCount()] {
+		if !rest.wakeAt.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hover int, p placement) (markFrames, bool) {
 	var frames markFrames
 	ages := w.ages(rows, now)
@@ -293,8 +302,9 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 			*r = markRest{identity: rows[slot].Identity, lastActivity: now}
 			w.looks[slot] = workLook{}
 		}
-		if age >= 0 {
-			r.lastActivity = now
+		r.observeWork(now, start, age)
+		if p.ReduceMotion {
+			r.wakeAt = time.Time{}
 		}
 	}
 	if p.ReduceMotion {
@@ -346,6 +356,13 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 		if tool[slot].holds && kind == agentactivity.Think && slot != hover {
 			frame, moving = workBase+workFrames-1, false
 		}
+		if kind == agentactivity.Think && !tool[slot].holds {
+			if first, ok := r.wakeFrame(now, slot == 4); ok {
+				frame, moving = first, true
+			}
+		} else {
+			r.wakeAt = time.Time{}
+		}
 		frames[slot], active = frame, active || moving
 	}
 	return w.applyWaiting(frames, active, p, now, rows)
@@ -379,7 +396,7 @@ func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement,
 		if cue.at.IsZero() {
 			continue
 		}
-		w.rest[i].lastActivity, w.rest[i].nextVisit = now, time.Time{}
+		w.rest[i].lastActivity, w.rest[i].nextVisit, w.rest[i].wakeAt = now, time.Time{}, time.Time{}
 		w.looks[i] = workLook{} // attention interrupts the previous working look
 		frame, anim := pendingFrame(now.Sub(cue.at), cue.look, p.ReduceMotion)
 		frames[i] = frame

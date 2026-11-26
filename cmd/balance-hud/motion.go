@@ -27,6 +27,11 @@ const (
 	cueFrames       = 40
 	pendingBase     = cueBase + 3*cueFrames
 	waitAtlasFrames = 40
+	wakeBase        = pendingBase + 2*waitAtlasFrames
+	wakeFrames      = 24
+	wakeHopFrames   = 8
+	wakeFPS         = 24
+	wakeLead        = (11*time.Second + wakeFPS - 1) / wakeFPS
 )
 
 type markFrames [5]int // zero: logo; negative: idle, asleep or hover exit; workBase and higher: work/cue atlases
@@ -35,6 +40,7 @@ const (
 	hoverExit     = 500 * time.Millisecond // upstream BotMotion's morph stride
 	exitSteps     = 12
 	hudSleepAfter = time.Hour
+	hudWakeAfter  = 5 * time.Minute
 )
 
 func exitFrame(from, step int) int { return -2*idleFrames - 1 - from*exitSteps - step }
@@ -44,6 +50,8 @@ func exitFrame(from, step int) int { return -2*idleFrames - 1 - from*exitSteps -
 type markRest struct {
 	nextVisit, leftHover time.Time
 	lastActivity         time.Time
+	wakeAt               time.Time
+	working              bool
 	identity             string
 	hovered, sleepVisit  bool
 	hoverFrame           int
@@ -115,6 +123,42 @@ func (r *markRest) asleep(now, start time.Time) bool {
 		last = start
 	}
 	return now.Sub(last) >= hudSleepAfter
+}
+
+// BotDirector sends a start cue only after a real turn follows five
+// quiet minutes. A snapshot of a turn already running at boot is silent.
+func (r *markRest) observeWork(now, start time.Time, age time.Duration) {
+	if age < 0 {
+		r.working, r.wakeAt = false, time.Time{}
+		return
+	}
+	if !r.working {
+		last := r.lastActivity
+		if last.IsZero() {
+			last = start
+		}
+		began := now.Add(-age)
+		if began.After(start) && began.Sub(last) >= hudWakeAfter {
+			r.wakeAt = now
+		}
+	}
+	r.working, r.lastActivity = true, now
+}
+
+func (r *markRest) wakeFrame(now time.Time, limbed bool) (int, bool) {
+	if r.wakeAt.IsZero() || now.Sub(r.wakeAt) < wakeLead {
+		return 0, false
+	}
+	frames := wakeHopFrames
+	if limbed {
+		frames = wakeFrames
+	}
+	n := int((now.Sub(r.wakeAt) - wakeLead) * wakeFPS / time.Second)
+	if n >= frames {
+		r.wakeAt = time.Time{}
+		return 0, false
+	}
+	return wakeBase + n, true
 }
 
 // Apply the upstream working-look grace period. Flipping between thinking and

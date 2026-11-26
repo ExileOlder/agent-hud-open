@@ -758,7 +758,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 					previousFrames = visual
 					invalidate(bar)
 				}
-				interval := motionInterval(frames, active, blending || hover >= 0 && !p.ReduceMotion)
+				interval := motionInterval(frames, active, blending || (hover >= 0 || work.waking(p)) && !p.ReduceMotion)
 				if pressing || len(mail.queue) > 0 {
 					interval = desktopFastInterval
 				}
