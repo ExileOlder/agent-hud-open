@@ -105,7 +105,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	var bar, tip, prefs uintptr
 	mail := winMail{mailInbox: restoredInbox()}
 	var panel panelSettings
-	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 535, 176, 107, 49
+	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 565, 176, 107, 49
 	notices := tools.notices
 	var work workingMarks
 	agyActivity := tools.antigravityActivity

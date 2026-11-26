@@ -62,6 +62,8 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	}
 	base := t.TempDir()
 	t.Setenv("APPDATA", base)
+	hookHome := t.TempDir()
+	t.Setenv("CODEX_HOME", hookHome)
 	if err := (placement{Edge: 3, Offset: .4, Numbers: false}).save(); err != nil {
 		t.Fatal(err)
 	}
@@ -202,6 +204,15 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	post(prefs, 0x202, 0, 510, 107+5*49+20)
 	wait("optional fifth mark did not resize the float", func() bool {
 		return client(bar).Bottom == 5*barItem+2*barPadding
+	})
+	hookPath := filepath.Join(hookHome, "hooks.json")
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Fatalf("opening settings wrote hook configuration: %v", err)
+	}
+	post(prefs, 0x202, 0, 510, 107+7*49+20)
+	wait("approval setup did not register the native Windows callback", func() bool {
+		b, err := os.ReadFile(hookPath)
+		return err == nil && bytes.Contains(b, []byte(`"PermissionRequest"`)) && bytes.Contains(b, []byte(`"commandWindows"`))
 	})
 	var prefsOn placement
 	data, err := os.ReadFile(settingsPath())

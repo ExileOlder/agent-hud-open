@@ -100,9 +100,11 @@ For automatic reminders, add the indicated hooks for the clients you use. **Merg
   {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed codex -hook","timeout":5}]}]}}
   ```
 
-- **Codex approval reminders:** add a `PermissionRequest` handler in the same
-  `hooks.json`, including when local history integration is available. Review
-  and trust the handler in Codex before using it. Balance HUD posts one private
+- **Codex approval reminders:** in Balance HUD, choose **Settings → Accounts →
+  Codex · approval reminders → Set up**. This adds the `PermissionRequest` handler
+  to your Codex user configuration and leaves other hooks in place. Then open
+  **Review hooks** in Codex Desktop (or `/hooks` in the CLI) and trust the callback.
+  To add it manually, merge the example below into `hooks.json`. Balance HUD posts one private
   status to the inbox with a link to the requesting conversation. The hook
   returns no decision and never supplies input to Codex. It covers requests
   delivered by `PermissionRequest`; other prompts still use their own event

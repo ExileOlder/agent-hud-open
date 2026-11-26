@@ -60,6 +60,7 @@ func (s *panelSettings) items(p placement, rows []row) []settingsItem {
 		{deepSeekDisplayName + " · connect subscription", status(3)},
 		{"Claude Code · show in HUD", onOff(p.ShowClaude)},
 		{"Claude Code · sign in", claudeStatus},
+		{"Codex · approval reminders", "Set up"},
 	}
 }
 
@@ -181,6 +182,8 @@ func (s *panelSettings) apply(p *placement, index int, rows []row, t settingsToo
 		return true, p.ShowClaude
 	case 6:
 		s.message = launchSettingsCommand(t.claude, "auth", "login")
+	case 7:
+		s.message = setUpCodexApprovalHook()
 	}
 	return false, false
 }

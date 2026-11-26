@@ -90,13 +90,7 @@ func main() {
 	}
 	if *desktop {
 		var notices <-chan codexnotice.Event
-		home := os.Getenv("CODEX_HOME")
-		if home == "" {
-			if dir, err := os.UserHomeDir(); err == nil {
-				home = filepath.Join(dir, ".codex")
-			}
-		}
-		if home != "" {
+		if home := codexHome(); home != "" {
 			notices = codexnotice.Watch(ctx, home)
 		}
 		profiles := loadAntigravityProfiles()

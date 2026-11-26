@@ -380,7 +380,7 @@ static void drop(Hud *h, int x, int y) {
     place(h);
 }
 
-enum { prefs_w=760, prefs_h=535, sidebar_w=176, prefs_top=107, prefs_row=49 };
+enum { prefs_w=760, prefs_h=565, sidebar_w=176, prefs_top=107, prefs_row=49 };
 static void prefs_box(Hud *h,int x,int y,int w,int height,unsigned long fill) {
     XSetForeground(h->d,h->gc,fill);
     XFillRectangle(h->d,h->prefs,h->gc,x,y,w,height);
