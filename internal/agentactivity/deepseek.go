@@ -14,6 +14,7 @@ import (
 // Pending requests are reported once, without reading the request content.
 type DeepSeekStatus struct {
 	Running   bool
+	Pending   bool
 	Questions int
 	Completed int
 }
@@ -75,7 +76,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 			turnSeq, scannedSeq        int
 		}
 		cache := map[string]cacheEntry{}
-		running := false
+		running, pending := false, false
 		started := time.Now()
 		for {
 			now := time.Now()
@@ -124,15 +125,16 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 					}
 					retain[f.Name()] = c
 					state.Running = state.Running || (c.running && c.questionCount == 0)
+					state.Pending = state.Pending || c.questionCount > 0
 				}
 				cache = retain
-				if state.Running != running || state.Questions > 0 || state.Completed > 0 {
+				if state.Running != running || state.Pending != pending || state.Questions > 0 || state.Completed > 0 {
 					select {
 					case out <- state:
 					case <-ctx.Done():
 						return
 					}
-					running = state.Running
+					running, pending = state.Running, state.Pending
 				}
 			}
 			select {

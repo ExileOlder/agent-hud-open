@@ -17,7 +17,8 @@ const idle = query.has("idle");
 const work = query.has("work");
 const workFPS = 12, workCount = 48;
 const keys = compact ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
-const frames = cue ? 24 : tool ? 32 : work ? workCount : idle ? idleCount : count;
+const wait = cue === "question" || cue === "permission";
+const frames = wait ? 40 : cue ? 24 : tool ? 32 : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
 sheet.height = keys.length * frames / columns * cell;
@@ -68,7 +69,12 @@ async function record() {
     }
     const scratch = document.createElement("canvas");
     for (let i = 0; i < frames; i++) {
-      motion.step((start + i) / frameRate);
+      // 24 entrance frames; the two following 8-frame groups sample the
+      // alternating repeat movements at 3.8s and 6.4s from BotMoves.
+      const age = wait && i >= 24
+        ? (i < 32 ? 3.8 : 6.4) + ((i - 24) % 8) / frameRate
+        : i / frameRate;
+      motion.step(start / frameRate + age);
       renderBot(form, motion, side, 0, scratch);
       const {x, y, footing, rotation, scaleX, scaleY} = motion.pose;
       const left = i % columns * cell, top = (slot * frames / columns + Math.floor(i / columns)) * cell;

@@ -141,7 +141,7 @@ func (m *mailInbox) cueFrames(now time.Time, p placement, rows []row, frames mar
 			}
 			continue
 		}
-		if cue.look == cueDone && frames[i] >= workBase {
+		if frames[i] >= pendingBase || (cue.look == cueDone && frames[i] >= workBase) {
 			continue
 		}
 		frames[i] = cueBase + int(cue.look)*cueFrames + frame
@@ -150,6 +150,11 @@ func (m *mailInbox) cueFrames(now time.Time, p placement, rows []row, frames mar
 	return frames, active
 }
 
+func (m *mailInbox) clearWaitCue(slot int) {
+	if m.cues[slot].look != cueDone {
+		m.cues[slot] = markCue{}
+	}
+}
 func (m *mailInbox) sourceSlot(item mailItem, rows []row) int {
 	if item.agent == 2 && item.profile != 0 {
 		for _, i := range []int{1, 2} {

@@ -43,13 +43,27 @@ func antigravityProfileKeys() map[string]uint32 {
 }
 
 type workingMarks struct {
-	codex    workClock
-	deepSeek time.Time
-	agy      map[string]workClock
-	hooks    [2]map[uint32]workClock
+	codex                   workClock
+	deepSeek                time.Time
+	agy                     map[string]workClock
+	hooks                   [2]map[uint32]workClock
+	pendingHooks            [2]map[uint32]markCue
+	codexWait, deepSeekWait markCue
 }
 
-func (w *workingMarks) updateCodex(e codexnotice.Event, now time.Time) {
+func setProjectionWaiting(m *markCue, active bool, now time.Time, inbox *mailInbox, slot int) {
+	if !active {
+		if !m.at.IsZero() {
+			inbox.clearWaitCue(slot)
+		}
+		*m = markCue{}
+	} else if m.at.IsZero() {
+		*m = markCue{cueQuestion, now}
+	}
+}
+
+func (w *workingMarks) updateCodex(e codexnotice.Event, inbox *mailInbox, now time.Time) {
+	setProjectionWaiting(&w.codexWait, e.Pending, now, inbox, 0)
 	if !e.Working {
 		w.codex = workClock{}
 		return
@@ -74,6 +88,7 @@ func deepSeekHome() string {
 }
 
 func (w *workingMarks) updateDeepSeek(state agentactivity.DeepSeekStatus, mail *mailInbox, now time.Time, motion bool) {
+	setProjectionWaiting(&w.deepSeekWait, state.Pending, now, mail, 3)
 	if state.Running {
 		if w.deepSeek.IsZero() {
 			w.deepSeek = now
@@ -114,9 +129,15 @@ func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion
 		return
 	}
 	var work map[uint32]workClock
+	var waits map[uint32]markCue
 	if e.session != 0 && (e.agent == 3 || e.agent == 5) {
 		i := (e.agent - 3) / 2
 		work = w.hooks[i]
+		waits = w.pendingHooks[i]
+		if (e.phase == hookWait || e.phase == hookPermission) && waits == nil {
+			waits = make(map[uint32]markCue)
+			w.pendingHooks[i] = waits
+		}
 		if (e.phase == hookWork || (e.phase >= hookRead && e.phase <= hookCommand)) && work == nil {
 			work = make(map[uint32]workClock)
 			w.hooks[i] = work
@@ -124,6 +145,10 @@ func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion
 	}
 	switch e.phase {
 	case hookWork, hookRead, hookEdit, hookCommand:
+		if _, ok := waits[e.session]; ok {
+			delete(waits, e.session)
+			inbox.clearWaitCue(completionSlot(e.agent))
+		}
 		clock := work[e.session]
 		if clock.started.IsZero() {
 			clock.started = now
@@ -139,6 +164,17 @@ func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion
 		work[e.session] = clock
 	case hookComplete, hookWait, hookPermission:
 		delete(work, e.session)
+		if e.phase == hookWait || e.phase == hookPermission {
+			look := cueQuestion
+			if e.phase == hookPermission {
+				look = cuePermission
+			}
+			if prev := waits[e.session]; prev.at.IsZero() || prev.look != look {
+				waits[e.session] = markCue{look, now}
+			}
+		} else {
+			delete(waits, e.session)
+		}
 		var profile uint32
 		if e.agent == 2 {
 			profile = e.session
@@ -146,6 +182,10 @@ func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion
 		inbox.receive(mailItem{agent: e.agent, event: codexnotice.Event{Question: e.phase == hookWait || e.phase == hookPermission}, permission: e.phase == hookPermission, profile: profile}, now, motion)
 	case hookEnd:
 		delete(work, e.session)
+		if _, ok := waits[e.session]; ok {
+			delete(waits, e.session)
+			inbox.clearWaitCue(completionSlot(e.agent))
+		}
 	}
 }
 
@@ -173,7 +213,7 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 	ages := w.ages(rows, now)
 	frames, active := motionFrames(now.Sub(start), hover, now.Sub(hoverStart), p.ReduceMotion, p.slotCount(), ages[:]...)
 	if p.ReduceMotion {
-		return frames, active
+		return w.applyWaiting(frames, active, p, now)
 	}
 	if w.codex.tool != agentactivity.Think {
 		frames[0] = toolFrame(w.codex.tool, now.Sub(w.codex.poseAt))
@@ -197,6 +237,32 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 		if selected.tool != agentactivity.Think {
 			frames[slot] = toolFrame(selected.tool, now.Sub(selected.poseAt))
 		}
+	}
+	return w.applyWaiting(frames, active, p, now)
+}
+
+func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement, now time.Time) (markFrames, bool) {
+	cues := [5]markCue{0: w.codexWait, 3: w.deepSeekWait}
+	for i, sessions := range w.pendingHooks {
+		slot := i + 3
+		for session, cue := range sessions {
+			if now.Sub(cue.at) >= 30*time.Minute {
+				delete(sessions, session)
+				continue
+			}
+			current := cues[slot]
+			if current.at.IsZero() || cue.look > current.look || cue.look == current.look && cue.at.Before(current.at) {
+				cues[slot] = cue
+			}
+		}
+	}
+	for i, cue := range cues[:p.slotCount()] {
+		if cue.at.IsZero() {
+			continue
+		}
+		frame, anim := pendingFrame(now.Sub(cue.at), cue.look, p.ReduceMotion)
+		frames[i] = frame
+		active = active || anim
 	}
 	return frames, active
 }

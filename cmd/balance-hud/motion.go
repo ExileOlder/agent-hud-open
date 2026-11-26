@@ -1,20 +1,23 @@
 package main
 
 import (
-	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"time"
+
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 )
 
 const (
-	idleFrames = 88
-	idleFPS    = 16
-	workFPS    = 12
-	workFrames = 48
-	workBase   = hoverFrames
-	toolBase   = workBase + workFrames
-	toolFrames = 32
-	cueBase    = toolBase + 4*toolFrames
-	cueFrames  = 24
+	idleFrames      = 88
+	idleFPS         = 16
+	workFPS         = 12
+	workFrames      = 48
+	workBase        = hoverFrames
+	toolBase        = workBase + workFrames
+	toolFrames      = 32
+	cueBase         = toolBase + 4*toolFrames
+	cueFrames       = 24
+	pendingBase     = cueBase + 3*cueFrames
+	waitAtlasFrames = 40
 )
 
 // An idle visit wakes after about 20–35 seconds like the original HUD.
@@ -70,4 +73,35 @@ func toolFrame(tool agentactivity.Tool, age time.Duration) int {
 	}
 	frame := int(max(0, age)*workFPS/time.Second) % toolFrames
 	return toolBase + (int(tool)-1)*toolFrames + frame
+}
+
+// The original BotMoves repeats after its first movement at 1.2s, every
+// 2.6s, then every 8s from 120.8s. The two atlas groups capture alternating
+// movements. A settled pose is drawn once and held until the next movement.
+func pendingFrame(age time.Duration, look cueLook, reduce bool) (int, bool) {
+	const firstRepeat = 3800 * time.Millisecond
+	const frequent = 2600 * time.Millisecond
+	const slowStart = 120800 * time.Millisecond
+	const slow = 8 * time.Second
+	base := pendingBase + int(look)*waitAtlasFrames
+	if reduce {
+		return base + 23, false
+	}
+	if age < 2*time.Second {
+		return base + int(max(0, age)*12/time.Second), true
+	}
+	if age < firstRepeat {
+		return base + 23, false
+	}
+	var n int
+	var since time.Duration
+	if age < slowStart {
+		n = 1 + int((age-firstRepeat)/frequent)
+		since = (age - firstRepeat) % frequent
+	} else {
+		n = 46 + int((age-slowStart)/slow)
+		since = (age - slowStart) % slow
+	}
+	frame := int(since * 12 / time.Second)
+	return base + 24 + ((n+1)%2)*8 + min(7, frame), frame < 7
 }

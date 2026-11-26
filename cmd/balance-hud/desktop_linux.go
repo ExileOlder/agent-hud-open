@@ -250,7 +250,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		case event, ok := <-notices:
 			if ok {
 				if event.Activity {
-					work.updateCodex(event, time.Now())
+					work.updateCodex(event, &mail, time.Now())
 				} else {
 					mail.receive(mailItem{agent: 1, event: event}, time.Now(), !p.ReduceMotion)
 				}

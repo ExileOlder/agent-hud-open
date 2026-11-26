@@ -15,6 +15,7 @@ type Event struct {
 	Question bool
 	Activity bool
 	Working  bool
+	Pending  bool
 	Tool     agentactivity.Tool
 }
 
@@ -101,11 +102,13 @@ func Watch(ctx context.Context, home string) <-chan Event {
 			if err == nil {
 				next := make(map[string]bool, len(rows))
 				work := Event{Activity: true}
+				pending := false
 				for _, event := range rows {
 					if event.Activity {
 						work = event
 						continue
 					}
+					pending = pending || event.Question
 					key := event.Thread + "/" + event.ID
 					next[key] = true
 					if seen[key] || initial && !event.Question {
@@ -117,6 +120,7 @@ func Watch(ctx context.Context, home string) <-chan Event {
 						return
 					}
 				}
+				work.Pending = pending
 				if work != lastWork {
 					select {
 					case out <- work:

@@ -62,7 +62,10 @@ cards send a paper plane to the message badge at the end of the dock. Hover or
 click the badge to open the message list. Use a row’s **×** to dismiss it, or
 **全部清空** to clear the list. With animation enabled, the source
 mark shows a question, approval, or completion gesture when that event arrives.
-Another still-running turn keeps its working expression on completion.
+Pending questions and approvals keep their mark visible with intermittent
+movement until the client reports progress or closure. Clearing the inbox does
+not dismiss a client's outstanding request. Another still-running turn keeps
+its working expression on completion.
 Balance HUD reads event types and IDs
 from Codex's local history projection and shows only a short status.
 Double-click a Codex notice to return to its conversation. Double-click a floating
