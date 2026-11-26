@@ -19,6 +19,8 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxext-dev libxft-dev libsqlite3-dev
       - run: go test ./...
+        env:
+          BALANCE_HUD_GUI_SMOKE: ${{ runner.os == 'Windows' && '1' || '0' }}
       - if: runner.os == 'Linux'
         run: go build -trimpath -ldflags="-s -w" -o balance-hud ./cmd/balance-hud
       - if: runner.os == 'Windows'
