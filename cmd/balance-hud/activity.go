@@ -87,7 +87,19 @@ func deepSeekHome() string {
 }
 
 func (w *workingMarks) updateDeepSeek(state agentactivity.DeepSeekStatus, mail *mailInbox, now time.Time, motion bool) {
-	setProjectionWaiting(&w.deepSeekWait, state.Pending, now, mail, 3)
+	was := w.deepSeekWait
+	switch {
+	case state.ApprovalPending:
+		if was.at.IsZero() || was.look != cuePermission {
+			w.deepSeekWait = markCue{cuePermission, now}
+		}
+	case state.Pending:
+		if was.at.IsZero() || was.look != cueQuestion {
+			w.deepSeekWait = markCue{cueQuestion, now}
+		}
+	default:
+		setProjectionWaiting(&w.deepSeekWait, false, now, mail, 3)
+	}
 	if state.Running {
 		if w.deepSeek.IsZero() {
 			w.deepSeek = now
@@ -97,6 +109,9 @@ func (w *workingMarks) updateDeepSeek(state agentactivity.DeepSeekStatus, mail *
 	}
 	for range state.Questions {
 		mail.receive(mailItem{agent: deepSeekAgent, event: codexnotice.Event{Question: true}}, now, motion)
+	}
+	for range state.Approvals {
+		mail.receive(mailItem{agent: deepSeekAgent, permission: true, event: codexnotice.Event{Question: true}}, now, motion)
 	}
 	for range state.Completed {
 		mail.receive(mailItem{agent: deepSeekAgent}, now, motion)

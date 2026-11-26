@@ -60,3 +60,19 @@ func TestWaitingStateIsIndependentOfInboxAndSessions(t *testing.T) {
 		}
 	}
 }
+
+func TestDeepSeekApprovalKeepsDistinctMailboxAndWaitState(t *testing.T) {
+	var w workingMarks
+	var mail mailInbox
+	now := time.Now()
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, Questions: 1}, &mail, now, false)
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, ApprovalPending: true, Approvals: 1}, &mail, now.Add(time.Second), false)
+	if w.deepSeekWait.look != cuePermission || len(mail.items) != 2 ||
+		mail.items[0].agent != deepSeekAgent || mail.items[0].summary() != "等你确认一下" || mail.items[1].permission {
+		t.Fatalf("approval failed to take priority: %+v %v", w.deepSeekWait, mail.items)
+	}
+	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true}, &mail, now.Add(2*time.Second), false)
+	if w.deepSeekWait.at.IsZero() || w.deepSeekWait.look != cueQuestion || len(mail.items) != 2 {
+		t.Fatalf("completing approval hid the pending question or changed the inbox: %+v %v", w.deepSeekWait, mail.items)
+	}
+}

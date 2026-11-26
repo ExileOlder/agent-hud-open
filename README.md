@@ -80,9 +80,11 @@ same message list. Double-click a message to open its client. Keep Balance HUD
 running to receive hook messages.
 
 With DeepSeek Harness 0.2's local projection cache, working turns and pending
-questions reach the HUD directly. For a completed turn the HUD verifies its
-outcome in Harness's compressed session log and only shows a completion
-notice for success. The watcher uses `DSH_HOME` or `~/.dsh`. The
+questions reach the HUD directly. Approvals are detected from unmatched request
+IDs within the active turn's flushed local log. The HUD displays a short status;
+the reason and response stay in Harness. The approval pose clears when the
+decision or turn end is flushed. For completed turns the HUD verifies the
+outcome in the same log and only shows a completion notice for success. The watcher uses `DSH_HOME` or `~/.dsh`. The
 Mistral quota source and the Harness task state are independent. On Linux the
 mark uses the installed `deepseek-harness-tools.desktop` shortcut; Windows
 uses the Harness’s `dsh://open` handler.

@@ -13,10 +13,12 @@ import (
 // DeepSeekStatus is derived only from the Harness's local client projection.
 // Pending requests are reported once, without reading the request content.
 type DeepSeekStatus struct {
-	Running   bool
-	Pending   bool
-	Questions int
-	Completed int
+	Running         bool
+	Pending         bool // at least one question remains open
+	ApprovalPending bool
+	Questions       int
+	Approvals       int
+	Completed       int
 }
 
 type deepSeekProjection struct {
@@ -28,6 +30,9 @@ type deepSeekProjection struct {
 					Open *int `json:"openTurnStartSeq"`
 				} `json:"val"`
 			} `json:"turnBoundary"`
+			Approval struct {
+				Value struct{ Policy string } `json:"val"`
+			} `json:"approvalState"`
 			Questions struct {
 				Seq   int
 				Value struct {
@@ -74,9 +79,12 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 			running                    bool
 			questionCount, questionSeq int
 			turnSeq, scannedSeq        int
+			openTurn                   *int
+			approvalDisabled           bool
+			approvals                  deepSeekApprovals
 		}
 		cache := map[string]cacheEntry{}
-		running, pending := false, false
+		running, pending, approving := false, false, false
 		started := time.Now()
 		for {
 			now := time.Now()
@@ -101,7 +109,9 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 						}
 						rows := view.Record.Rows
 						c.modified = info.ModTime()
-						c.running = rows.Turn.Value.Open != nil
+						c.openTurn = rows.Turn.Value.Open
+						c.running = c.openTurn != nil
+						c.approvalDisabled = rows.Approval.Value.Policy == "never"
 						c.questionCount = len(rows.Questions.Value.Questions.Active)
 						c.questionSeq = rows.Questions.Seq
 						c.turnSeq = rows.Turn.Seq
@@ -123,18 +133,25 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 							}
 						}
 					}
+					if c.running && !c.approvalDisabled {
+						state.Approvals += c.approvals.watch(home, strings.TrimSuffix(f.Name(), ".json"), *c.openTurn)
+					} else {
+						c.approvals = deepSeekApprovals{}
+					}
 					retain[f.Name()] = c
-					state.Running = state.Running || (c.running && c.questionCount == 0)
+					waitingApproval := len(c.approvals.pending) > 0
+					state.ApprovalPending = state.ApprovalPending || waitingApproval
+					state.Running = state.Running || (c.running && !c.approvals.closed && c.questionCount == 0 && !waitingApproval)
 					state.Pending = state.Pending || c.questionCount > 0
 				}
 				cache = retain
-				if state.Running != running || state.Pending != pending || state.Questions > 0 || state.Completed > 0 {
+				if state.Running != running || state.Pending != pending || state.ApprovalPending != approving || state.Questions > 0 || state.Approvals > 0 || state.Completed > 0 {
 					select {
 					case out <- state:
 					case <-ctx.Done():
 						return
 					}
-					running, pending = state.Running, state.Pending
+					running, pending, approving = state.Running, state.Pending, state.ApprovalPending
 				}
 			}
 			select {
