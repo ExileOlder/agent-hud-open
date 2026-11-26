@@ -7,6 +7,9 @@ import (
 	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"hash/fnv"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -58,6 +61,7 @@ const (
 	hookRead
 	hookEdit
 	hookCommand
+	hookPermission
 )
 const hookPhaseStep = 8
 
@@ -70,7 +74,7 @@ type hookEvent struct {
 func (e hookEvent) code() int { return e.agent + hookPhaseStep*int(e.phase) }
 func decodeHook(code int, session uint32) hookEvent {
 	agent, phase := code%hookPhaseStep, hookPhase(code/hookPhaseStep)
-	if agent <= 0 || agent >= len(agentNames) || phase < hookComplete || phase > hookCommand {
+	if agent <= 0 || agent >= len(agentNames) || phase < hookComplete || phase > hookPermission {
 		return hookEvent{}
 	}
 	if phase != hookComplete && ((agent != 3 && agent != 5) || session == 0) {
@@ -86,6 +90,7 @@ func parseHook(id int, r io.Reader) hookEvent {
 		Session      string     `json:"session_id"`
 		Parent       string     `json:"parent_session_id"`
 		Tool         string     `json:"tool_name"`
+		Transcript   string     `json:"transcriptPath"`
 		StopReason   string     `json:"terminationReason"`
 		Idle         bool       `json:"fullyIdle"`
 		Error        string     `json:"error"`
@@ -97,12 +102,9 @@ func parseHook(id int, r io.Reader) hookEvent {
 	}
 	var session uint32
 	if event.Session != "" && (id == 3 || id == 5) {
-		h := fnv.New32a()
-		_, _ = h.Write([]byte(event.Session))
-		session = h.Sum32()
-		if session == 0 {
-			session = 1
-		}
+		session = opaqueKey(event.Session)
+	} else if id == 2 {
+		session = antigravityCallbackProfile(event.Transcript)
 	}
 	phase := hookComplete
 	switch id {
@@ -122,7 +124,9 @@ func parseHook(id int, r io.Reader) hookEvent {
 		case "turn_completed":
 		case "turn_failed":
 			phase = hookEnd
-		case "approval_requested", "question_asked":
+		case "approval_requested":
+			phase = hookPermission
+		case "question_asked":
 			phase = hookWait
 		default:
 			switch event.Event {
@@ -145,7 +149,7 @@ func parseHook(id int, r io.Reader) hookEvent {
 		case "UserPromptSubmit", "PostToolUse", "PostToolUseFailure":
 			phase = hookWork
 		case "PermissionRequest":
-			phase = hookWait
+			phase = hookPermission
 		case "PreToolUse":
 			if event.Tool == "AskUserQuestion" {
 				phase = hookWait
@@ -161,6 +165,39 @@ func parseHook(id int, r io.Reader) hookEvent {
 		return hookEvent{}
 	}
 	return decodeHook(id+int(phase)*hookPhaseStep, session)
+}
+
+func opaqueKey(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	if key := h.Sum32(); key != 0 {
+		return key
+	}
+	return 1
+}
+func profileKey(path string) uint32 {
+	normalized := filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		normalized = strings.ToLower(normalized)
+	}
+	return opaqueKey(normalized)
+}
+func antigravityCallbackProfile(transcript string) uint32 {
+	if filepath.IsAbs(transcript) {
+		for parent := filepath.Dir(transcript); filepath.Dir(parent) != parent; parent = filepath.Dir(parent) {
+			switch filepath.Base(parent) {
+			case "antigravity", "antigravity-cli", "antigravity-ide":
+				return profileKey(filepath.Dir(parent))
+			}
+		}
+	}
+	if home := os.Getenv("GEMINI_CLI_HOME"); filepath.IsAbs(home) {
+		return profileKey(home)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return profileKey(filepath.Join(home, ".gemini"))
+	}
+	return 0
 }
 
 func toolPhase(name string) hookPhase {

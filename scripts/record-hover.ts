@@ -9,13 +9,15 @@ import { SplitMix } from "./bots/bot-pace";
 const marks = document.images;
 const query = new URLSearchParams(location.search);
 const tool = query.get("tool") as BotLook | null;
-const cell = tool ? 64 : 80, side = tool ? 43 : 54, count = 40, columns = 8;
+const cue = query.get("cue") as BotLook | null;
+const compact = tool || cue;
+const cell = compact ? 64 : 80, side = compact ? 43 : 54, count = 40, columns = 8;
 const idleFPS = 16, idleCount = 88;
 const idle = query.has("idle");
 const work = query.has("work");
 const workFPS = 12, workCount = 48;
-const keys = tool ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
-const frames = tool ? 32 : work ? workCount : idle ? idleCount : count;
+const keys = compact ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
+const frames = cue ? 24 : tool ? 32 : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
 sheet.height = keys.length * frames / columns * cell;
@@ -41,7 +43,13 @@ async function record() {
     motion.set(botState({look: "idle"}), 0);
     motion.step(0);
     let start = 0, frameRate = 25;
-    if (work || tool) {
+    if (cue) {
+      frameRate = cue === "done" ? 16 : 12;
+      start = frameRate;
+      motion.set(botState({look: "thinking"}), 0);
+      for (let i = 1; i <= start; i++) motion.step(i / frameRate);
+      motion.set(botState({look: cue}), start / frameRate);
+    } else if (work || tool) {
       motion.set(botState({look: tool ?? "thinking"}), 0);
       frameRate = workFPS;
       start = workFPS;
@@ -68,7 +76,7 @@ async function record() {
       ctx.beginPath();
       ctx.rect(left, top, cell, cell);
       ctx.clip();
-      ctx.translate(left + cell / 2 + x * side, top + cell / 2 + (y + footing) * side);
+      ctx.translate(left + cell / 2 + x * side, top + cell / 2 + (cue && cue !== "done" ? 5 : 0) + (y + footing) * side);
       ctx.rotate(rotation * Math.PI / 180);
       ctx.scale(scaleX, scaleY);
       ctx.translate(0, -footing * side);

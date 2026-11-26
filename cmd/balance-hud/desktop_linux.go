@@ -101,7 +101,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		go func() { ready <- fetch() }()
 	}
 	refresh()
-	var mail mailInbox
+	mail := mailInbox{profiles: antigravityProfileKeys()}
 	revision := -1
 	notices := tools.notices
 	var work workingMarks
@@ -117,7 +117,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		hidden := C.hud_drag_active(h) != 0
 		if revision != mail.revision {
 			for i, item := range mail.visible() {
-				title, value := C.CString(agentNames[item.agent]), C.CString(noticeCopy(item.event.Question))
+				title, value := C.CString(agentNames[item.agent]), C.CString(item.summary())
 				C.hud_mail_row(h, C.int(i), title, value)
 				C.free(unsafe.Pointer(title))
 				C.free(unsafe.Pointer(value))
@@ -133,7 +133,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		}
 		C.hud_mail_sync(h, C.int(count), opened, C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h))
 		if len(mail.queue) > 0 && !hidden {
-			source := completionSlot(mail.queue[0].agent)
+			source := mail.sourceSlot(mail.queue[0], rows)
 			if source < 0 || source >= p.slotCount() {
 				source = p.slotCount() / 2
 			}
@@ -268,6 +268,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			hoverStart, lastHover = now, hover
 		}
 		frames, active := work.frames(rows, now, started, hoverStart, hover, p)
+		frames, active = mail.cueFrames(now, p, rows, frames, active)
 		animating = active
 		if dirty || frames != previousFrames {
 			paint(frames)

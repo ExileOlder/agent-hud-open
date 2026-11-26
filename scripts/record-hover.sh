@@ -7,7 +7,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 upstream="$1"
 shift
-if [[ $# == 0 ]]; then set -- hover idle claude-hover claude-idle work claude-work tool; fi
+if [[ $# == 0 ]]; then set -- hover idle claude-hover claude-idle work claude-work tool cue-question cue-permission cue-done; fi
 cp -r "$upstream/packages/hud/src/bots" "$tmp/bots"
 cp "$root/scripts/record-hover.ts" "$tmp/record-hover.ts"
 "${ESBUILD:-esbuild}" "$tmp/record-hover.ts" --bundle "--outfile=$tmp/hover.js"
@@ -25,6 +25,7 @@ for mode in "$@"; do
   case "$mode" in
     hover) :;;
     tool) query="?tool=tool-read";;
+    cue-question|cue-permission|cue-done) query="?cue=${mode#cue-}";;
     idle) query="?idle";;
     work) query="?work";;
     claude-work) query="?claude&work";;

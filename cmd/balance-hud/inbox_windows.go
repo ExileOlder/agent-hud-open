@@ -64,7 +64,7 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 			y := int32(mailHeader + i*mailRow)
 			fillMailRect(dc, 15, y, int32(m.lastPanel.w-30), mailRow-4, bgBrush)
 			write(dc, 27, y+14, agentNames[item.agent], 0xf6f4f2)
-			write(dc, max(168, 27+measure(dc, agentNames[item.agent])+18), y+14, noticeCopy(item.event.Question), 0xd4d0cc)
+			write(dc, max(168, 27+measure(dc, agentNames[item.agent])+18), y+14, item.summary(), 0xd4d0cc)
 		}
 	case m.paper:
 		pen := g("CreatePen", 0, 1, 0xffaa7e)
@@ -80,7 +80,7 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 		g("DeleteObject", pen)
 	}
 }
-func (m *winMail) draw(now time.Time, frame, area rect, p placement, drag bool, shape func(uintptr, int32, int32, int32), invalidate func(uintptr)) {
+func (m *winMail) draw(now time.Time, frame, area rect, p placement, rows []row, drag bool, shape func(uintptr, int32, int32, int32), invalidate func(uintptr)) {
 	if m.badge == 0 || m.panel == 0 || m.paper == 0 {
 		return
 	}
@@ -129,7 +129,7 @@ func (m *winMail) draw(now time.Time, frame, area rect, p placement, drag bool, 
 		}
 		return
 	}
-	source := completionSlot(m.queue[0].agent)
+	source := m.sourceSlot(m.queue[0], rows)
 	if source < 0 || source >= p.slotCount() {
 		source = p.slotCount() / 2
 	}

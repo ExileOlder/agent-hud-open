@@ -59,7 +59,10 @@ Licensed under Apache-2.0; the upstream license is kept in LICENSE.
 
 With the HUD open, new Codex turns that finish and pending Codex Desktop question
 cards send a paper plane to the message badge at the end of the dock. Hover or
-click the badge to open the message list. Balance HUD reads event types and IDs
+click the badge to open the message list. With animation enabled, the source
+mark shows a question, approval, or completion gesture when that event arrives.
+Another still-running turn keeps its working expression on completion.
+Balance HUD reads event types and IDs
 from Codex's local history projection and shows only a short status.
 Double-click a Codex notice to return to its conversation. Double-click a floating
 mark to open its client. If DeepSeek Harness is installed, the fourth mark

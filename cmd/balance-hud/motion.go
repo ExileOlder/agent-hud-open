@@ -13,6 +13,8 @@ const (
 	workBase   = hoverFrames
 	toolBase   = workBase + workFrames
 	toolFrames = 32
+	cueBase    = toolBase + 4*toolFrames
+	cueFrames  = 24
 )
 
 // An idle visit wakes after about 20–35 seconds like the original HUD.

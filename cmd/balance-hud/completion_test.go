@@ -38,7 +38,7 @@ func TestNativeLifecyclePayload(t *testing.T) {
 	}{
 		{5, `{"hook_event_name":"UserPromptSubmit","session_id":"one","prompt":"private"}`, hookWork, true},
 		{5, `{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"one"}`, hookWait, true},
-		{5, `{"hook_event_name":"PermissionRequest","session_id":"one"}`, hookWait, true},
+		{5, `{"hook_event_name":"PermissionRequest","session_id":"one"}`, hookPermission, true},
 		{5, `{"hook_event_name":"SessionEnd","session_id":"one"}`, hookEnd, true},
 		{3, `{"hook_event_name":"pre_llm","session_id":"one"}`, hookWork, true},
 		{3, `{"notification_type":"question_asked","session_id":"one"}`, hookWait, true},

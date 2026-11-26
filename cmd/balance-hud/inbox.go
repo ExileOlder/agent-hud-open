@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
@@ -24,18 +25,55 @@ const (
 type mailRect struct{ x, y, w, h int }
 type mailPoint struct{ x, y float64 }
 type mailItem struct {
-	agent int
-	event codexnotice.Event
+	agent      int
+	event      codexnotice.Event
+	permission bool
+	profile    uint32
 }
+
+func (item mailItem) summary() string {
+	if item.permission {
+		return "等你确认一下"
+	}
+	return noticeCopy(item.event.Question)
+}
+
 type mailInbox struct {
 	items, queue []mailItem
 	started      time.Time
 	open         bool
 	revision     int
 	offset       int
+	cues         [5]markCue
+	profiles     map[string]uint32
+	agyCues      map[uint32]markCue
 }
 
 func (m *mailInbox) receive(item mailItem, now time.Time, motion bool) {
+	if motion {
+		look := cueDone
+		if item.permission {
+			look = cuePermission
+		} else if item.event.Question {
+			look = cueQuestion
+		}
+		cue := markCue{look, now}
+		if item.agent == 2 {
+			if item.profile != 0 {
+				for _, p := range m.profiles {
+					if p == item.profile {
+						if m.agyCues == nil {
+							m.agyCues = make(map[uint32]markCue)
+						}
+						m.agyCues[p] = cue
+						break
+					}
+				}
+			}
+		} else if slot := completionSlot(item.agent); slot >= 0 {
+			m.cues[slot] = cue
+		}
+	}
 	if !motion {
 		m.land(item)
 		return
@@ -49,6 +87,67 @@ func (m *mailInbox) receive(item mailItem, now time.Time, motion bool) {
 		m.started = now
 	}
 }
+
+type cueLook uint8
+
+const (
+	cueQuestion cueLook = iota
+	cuePermission
+	cueDone
+)
+
+type markCue struct {
+	look cueLook
+	at   time.Time
+}
+
+func (m *mailInbox) cueFrames(now time.Time, p placement, rows []row, frames markFrames, active bool) (markFrames, bool) {
+	if p.ReduceMotion {
+		return frames, active
+	}
+	for i := 0; i < p.slotCount(); i++ {
+		cue := m.cues[i]
+		var profile uint32
+		if i == 1 || i == 2 {
+			profile = m.profiles[strings.ToLower(rows[i].Identity)]
+			cue = m.agyCues[profile]
+		}
+		if cue.at.IsZero() {
+			continue
+		}
+		fps := 12
+		if cue.look == cueDone {
+			fps = 16
+		}
+		frame := int(max(0, now.Sub(cue.at)) * time.Duration(fps) / time.Second)
+		if frame >= cueFrames {
+			if profile != 0 {
+				delete(m.agyCues, profile)
+			} else {
+				m.cues[i] = markCue{}
+			}
+			continue
+		}
+		if cue.look == cueDone && frames[i] >= workBase {
+			continue
+		}
+		frames[i] = cueBase + int(cue.look)*cueFrames + frame
+		active = true
+	}
+	return frames, active
+}
+
+func (m *mailInbox) sourceSlot(item mailItem, rows []row) int {
+	if item.agent == 2 && item.profile != 0 {
+		for _, i := range []int{1, 2} {
+			if m.profiles[strings.ToLower(rows[i].Identity)] == item.profile {
+				return i
+			}
+		}
+	}
+	return completionSlot(item.agent)
+}
+
 func (m *mailInbox) land(item mailItem) {
 	m.revision++
 	m.offset = 0

@@ -12,7 +12,7 @@ import (
 	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 )
 
-func watchAntigravity(ctx context.Context) <-chan map[string]agentactivity.Tool {
+func loadAntigravityProfiles() []agentactivity.AntigravityProfile {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return nil
@@ -25,7 +25,21 @@ func watchAntigravity(ctx context.Context) <-chan map[string]agentactivity.Tool 
 	if json.Unmarshal(data, &profiles) != nil {
 		return nil
 	}
-	return agentactivity.WatchAntigravity(ctx, profiles)
+	return profiles
+}
+
+func watchAntigravity(ctx context.Context) <-chan map[string]agentactivity.Tool {
+	return agentactivity.WatchAntigravity(ctx, loadAntigravityProfiles())
+}
+
+func antigravityProfileKeys() map[string]uint32 {
+	keys := map[string]uint32{}
+	for _, p := range loadAntigravityProfiles() {
+		if p.Account != "" && filepath.IsAbs(p.GeminiHome) {
+			keys[strings.ToLower(p.Account)] = profileKey(p.GeminiHome)
+		}
+	}
+	return keys
 }
 
 type workingMarks struct {
@@ -103,7 +117,7 @@ func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion
 	if e.session != 0 && (e.agent == 3 || e.agent == 5) {
 		i := (e.agent - 3) / 2
 		work = w.hooks[i]
-		if (e.phase == hookWork || e.phase >= hookRead) && work == nil {
+		if (e.phase == hookWork || (e.phase >= hookRead && e.phase <= hookCommand)) && work == nil {
 			work = make(map[uint32]workClock)
 			w.hooks[i] = work
 		}
@@ -123,9 +137,13 @@ func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion
 			clock.tool, clock.poseAt = tool, now
 		}
 		work[e.session] = clock
-	case hookComplete, hookWait:
+	case hookComplete, hookWait, hookPermission:
 		delete(work, e.session)
-		inbox.receive(mailItem{agent: e.agent, event: codexnotice.Event{Question: e.phase == hookWait}}, now, motion)
+		var profile uint32
+		if e.agent == 2 {
+			profile = e.session
+		}
+		inbox.receive(mailItem{agent: e.agent, event: codexnotice.Event{Question: e.phase == hookWait || e.phase == hookPermission}, permission: e.phase == hookPermission, profile: profile}, now, motion)
 	case hookEnd:
 		delete(work, e.session)
 	}

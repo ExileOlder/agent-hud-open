@@ -104,7 +104,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	p := loadPlacement()
 	rows := view(nil)
 	var bar, tip, prefs uintptr
-	var mail winMail
+	mail := winMail{mailInbox: mailInbox{profiles: antigravityProfileKeys()}}
 	var panel panelSettings
 	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 535, 176, 107, 49
 	notices := tools.notices
@@ -465,7 +465,8 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			return
 		}
 		now := time.Now()
-		frames, _ := work.frames(rows, now, started, hoverStart, hover, p)
+		frames, active := work.frames(rows, now, started, hoverStart, hover, p)
+		frames, _ = mail.cueFrames(now, p, rows, frames, active)
 		barImage = paintBar(rows, p, frames, barImage)
 		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
 		info := struct {
@@ -564,7 +565,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		invalidate(bar)
 	}
 
-	renderMail := func(now time.Time) { mail.draw(now, frame, area, p, pressing && moved, shape, invalidate) }
+	renderMail := func(now time.Time) { mail.draw(now, frame, area, p, rows, pressing && moved, shape, invalidate) }
 	handleIconClick := func(m point) bool {
 		_, _, step := dimensions()
 		v := m.X
@@ -682,6 +683,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			case 0x113: // WM_TIMER
 				now := time.Now()
 				frames, active := work.frames(rows, now, started, hoverStart, hover, p)
+				frames, active = mail.cueFrames(now, p, rows, frames, active)
 				if previousFrames != frames {
 					previousFrames = frames
 					invalidate(bar)

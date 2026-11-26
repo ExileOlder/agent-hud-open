@@ -34,6 +34,15 @@ var claudeWorkPNG []byte
 //go:embed artwork/tool.png
 var toolPNG []byte
 
+//go:embed artwork/cue-question.png
+var cueQuestionPNG []byte
+
+//go:embed artwork/cue-permission.png
+var cuePermissionPNG []byte
+
+//go:embed artwork/cue-done.png
+var cueDonePNG []byte
+
 const (
 	barPadding     = 4
 	barItem        = 92
@@ -63,6 +72,12 @@ var claudeWorkAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(cla
 // The upstream procedural performer shares this pose across tool kinds.
 // Keep a single atlas, not one duplicate sheet per status.
 var toolAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(toolPNG) })
+
+var cueAtlas = [...]func() image.Image{
+	sync.OnceValue(func() image.Image { return decodeAtlas(cueQuestionPNG) }),
+	sync.OnceValue(func() image.Image { return decodeAtlas(cuePermissionPNG) }),
+	sync.OnceValue(func() image.Image { return decodeAtlas(cueDonePNG) }),
+}
 
 func decodeAtlas(data []byte) image.Image {
 	img, err := png.Decode(bytes.NewReader(data))
@@ -153,7 +168,14 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		slot := [...]int{0, 1, 1, 2, 0}[i]
 		frame, count, atlas := frames[i], hoverFrames, hoverAtlas
 		cell, scaler := hoverCell, markScaler
-		if frame >= toolBase {
+		if frame >= cueBase {
+			look := (frame - cueBase) / cueFrames
+			frame, count, atlas = (frame-cueBase)%cueFrames, cueFrames, cueAtlas[look]()
+			if i == 4 {
+				slot = 3
+			}
+			cell, scaler = toolCell, toolScaler
+		} else if frame >= toolBase {
 			frame, count, atlas = (frame-toolBase)%toolFrames, toolFrames, toolAtlas()
 			if i == 4 {
 				slot = 3
