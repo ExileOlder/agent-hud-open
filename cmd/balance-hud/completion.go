@@ -64,6 +64,8 @@ const (
 	hookEdit
 	hookCommand
 	hookPermission
+	hookCompact
+	hookCompactEnd
 )
 const hookPhaseStep = 8
 const codexApprovalCode = 1 + hookPhaseStep*int(hookPermission)
@@ -78,7 +80,10 @@ type hookEvent struct {
 func (e hookEvent) code() int { return e.agent + hookPhaseStep*int(e.phase) }
 func decodeHook(code int, session uint32) hookEvent {
 	agent, phase := code%hookPhaseStep, hookPhase(code/hookPhaseStep)
-	if agent <= 0 || agent >= len(agentNames) || phase < hookComplete || phase > hookPermission {
+	if agent <= 0 || agent >= len(agentNames) || phase < hookComplete || phase > hookCompactEnd {
+		return hookEvent{}
+	}
+	if phase >= hookCompact && agent != 5 {
 		return hookEvent{}
 	}
 	if phase != hookComplete && ((agent != 3 && agent != 5) || session == 0) {
@@ -163,6 +168,10 @@ func parseHook(id int, r io.Reader) hookEvent {
 			} else {
 				phase = toolPhase(event.Tool)
 			}
+		case "PreCompact":
+			phase = hookCompact
+		case "PostCompact":
+			phase = hookCompactEnd
 		case "SessionEnd", "StopFailure":
 			phase = hookEnd
 		default:

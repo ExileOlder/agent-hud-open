@@ -126,3 +126,39 @@ func TestAntigravityWaitingAttributionDoesNotResendNotice(t *testing.T) {
 		t.Fatal("verifying the account should move the waiting pose without adding a second notice")
 	}
 }
+
+func TestClaudeCompactionIsImmediateAndReturnsToThePreviousWork(t *testing.T) {
+	var w workingMarks
+	var inbox mailInbox
+	p := placement{ShowClaude: true}
+	rows := view(nil)
+	now := time.Now()
+	post := func(phase hookPhase, offset time.Duration) {
+		w.hook(hookEvent{agent: 5, phase: phase, session: 42}, &inbox, now.Add(offset), true)
+	}
+	frame := func(offset time.Duration) int {
+		f, _ := w.frames(rows, now.Add(offset), now, now, -1, p)
+		return f[4]
+	}
+	post(hookRead, 0)
+	if got := frame(0); got != toolBase {
+		t.Fatalf("expected tool look, got %d", got)
+	}
+	post(hookCompact, time.Second)
+	if got := frame(time.Second); got != compactBase {
+		t.Fatalf("compacting was held back by the tool guard: %d", got)
+	}
+	post(hookCompactEnd, 2*time.Second)
+	if got := frame(2 * time.Second); got != toolBase {
+		t.Fatalf("ending compaction did not restore prior work: %d", got)
+	}
+	post(hookEnd, 3*time.Second)
+	post(hookCompact, 4*time.Second)
+	if got := frame(4 * time.Second); got != compactBase {
+		t.Fatalf("standalone compaction did not animate: %d", got)
+	}
+	post(hookCompactEnd, 5*time.Second)
+	if got := frame(5 * time.Second); got >= workBase || len(inbox.queue) != 0 {
+		t.Fatalf("ending manual compaction left work running or fabricated a message: %d", got)
+	}
+}

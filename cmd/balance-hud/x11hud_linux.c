@@ -824,7 +824,7 @@ int hud_step(Hud *h,int timeout) {
         if(e.type==ClientMessage && e.xclient.window==h->bar &&
            e.xclient.message_type==h->completion && e.xclient.format==32){
             long code=e.xclient.data.l[0];
-            if(code>=1&&code<64){
+            if(code>=1&&code<80){
                 h->hook_session=(unsigned int)e.xclient.data.l[1];
                 for(int i=0;i<4;i++)h->hook_route[i]=(unsigned int)e.xclient.data.l[i+1];
                 return 200+(int)code;

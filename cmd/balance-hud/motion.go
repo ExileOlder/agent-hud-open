@@ -20,7 +20,10 @@ const (
 	toolFrames      = 40
 	toolFPS         = 8
 	toolCycle       = 4500 * time.Millisecond
-	cueBase         = toolBase + 4*toolFrames
+	compactBase     = toolBase + 4*toolFrames
+	compactFrames   = 32
+	compactFPS      = 8
+	cueBase         = compactBase + compactFrames
 	cueFrames       = 40
 	pendingBase     = cueBase + 3*cueFrames
 	waitAtlasFrames = 40
@@ -137,6 +140,13 @@ func (m *workLook) follow(now, owner time.Time, want agentactivity.Tool) (agenta
 		m.guarded = false
 		m.changes = [4]time.Time{}
 	}
+	if want != m.shown && (want == agentactivity.Compact || m.shown == agentactivity.Compact) {
+		m.shown, m.shownAt, m.wantedAt = want, now, time.Time{}
+		copy(m.changes[:], m.changes[1:])
+		m.changes[3] = now
+		m.guarded = m.guarded || !m.changes[0].IsZero() && now.Sub(m.changes[0]) < 30*time.Second
+		return want, 0
+	}
 	if want == m.shown {
 		m.wantedAt = time.Time{}
 	} else {
@@ -162,6 +172,15 @@ func workAge(now, started time.Time) time.Duration {
 		return -1
 	}
 	return max(0, now.Sub(started))
+}
+
+func compactFrame(age time.Duration) int {
+	index := int(max(0, age) * compactFPS / time.Second)
+	const entrance = 8
+	if index >= compactFrames {
+		index = entrance + (index-entrance)%(compactFrames-entrance)
+	}
+	return compactBase + index
 }
 
 func toolFrame(tool agentactivity.Tool, age time.Duration) int {

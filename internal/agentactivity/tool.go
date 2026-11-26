@@ -11,6 +11,7 @@ const (
 	Edit
 	Command
 	LongCommand
+	Compact
 )
 
 // ClassifyTool projects only the tool category; names or arguments never

@@ -161,9 +161,9 @@ func (w *workingMarks) updateAntigravityWaits(waits []agentactivity.AntigravityW
 }
 
 type workClock struct {
-	started, last, poseAt time.Time
-	tool                  agentactivity.Tool
-	holds                 bool
+	started, last, poseAt, compactingAt time.Time
+	tool                                agentactivity.Tool
+	holds                               bool
 }
 
 func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion bool) {
@@ -180,12 +180,28 @@ func (w *workingMarks) hook(e hookEvent, inbox *mailInbox, now time.Time, motion
 			waits = make(map[uint32]markCue)
 			w.pendingHooks[i] = waits
 		}
-		if (e.phase == hookWork || (e.phase >= hookRead && e.phase <= hookCommand)) && work == nil {
+		if (e.phase == hookWork || e.phase == hookCompact || e.phase >= hookRead && e.phase <= hookCommand) && work == nil {
 			work = make(map[uint32]workClock)
 			w.hooks[i] = work
 		}
 	}
 	switch e.phase {
+	case hookCompact:
+		clock := work[e.session]
+		if clock.compactingAt.IsZero() {
+			clock.compactingAt = now
+		}
+		clock.last = now
+		work[e.session] = clock
+	case hookCompactEnd:
+		if clock, ok := work[e.session]; ok && !clock.compactingAt.IsZero() {
+			clock.compactingAt, clock.last = time.Time{}, now
+			if clock.started.IsZero() {
+				delete(work, e.session)
+			} else {
+				work[e.session] = clock
+			}
+		}
 	case hookWork, hookRead, hookEdit, hookCommand:
 		if _, ok := waits[e.session]; ok {
 			delete(waits, e.session)
@@ -238,8 +254,20 @@ func hookAge(now time.Time, work map[uint32]workClock) time.Duration {
 			delete(work, session)
 			continue
 		}
-		if first.IsZero() || c.started.Before(first) {
-			first = c.started
+		if !c.compactingAt.IsZero() && now.Sub(c.compactingAt) >= 5*time.Minute {
+			c.compactingAt = time.Time{}
+			if c.started.IsZero() {
+				delete(work, session)
+				continue
+			}
+			work[session] = c
+		}
+		started := c.started
+		if started.IsZero() {
+			started = c.compactingAt
+		}
+		if first.IsZero() || started.Before(first) {
+			first = started
 		}
 	}
 	return workAge(now, first)
@@ -273,7 +301,9 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 	}
 	for i, sessions := range w.hooks {
 		for _, clock := range sessions {
-			if clock.last.After(tool[i+3].last) {
+			before := tool[i+3]
+			if !clock.compactingAt.IsZero() && before.compactingAt.IsZero() ||
+				clock.compactingAt.IsZero() == before.compactingAt.IsZero() && clock.last.After(before.last) {
 				tool[i+3] = clock
 			}
 		}
@@ -291,11 +321,17 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 			}
 		}
 		want := tool[slot].tool
+		if !tool[slot].compactingAt.IsZero() {
+			want = agentactivity.Compact
+			owner = tool[slot].compactingAt
+		}
 		if want == agentactivity.Command && now.Sub(tool[slot].poseAt) >= 20*time.Second {
 			want = agentactivity.LongCommand
 		}
 		kind, phase := w.looks[slot].follow(now, owner, want)
-		if kind != agentactivity.Think {
+		if kind == agentactivity.Compact {
+			frame = compactFrame(phase)
+		} else if kind != agentactivity.Think {
 			frame = toolFrame(kind, phase)
 		}
 		if tool[slot].holds && kind == agentactivity.Think && slot != hover {

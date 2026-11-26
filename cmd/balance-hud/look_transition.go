@@ -26,7 +26,9 @@ func workLookForFrame(frame int) int {
 	switch {
 	case frame >= workBase && frame < toolBase:
 		return 1
-	case frame >= toolBase && frame < cueBase:
+	case frame >= compactBase && frame < cueBase:
+		return 6
+	case frame >= toolBase && frame < compactBase:
 		return 2 + (frame-toolBase)/toolFrames
 	default:
 		return 0

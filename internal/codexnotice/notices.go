@@ -79,8 +79,12 @@ WHERE status='completed' AND completed_at > CAST(strftime('%s','now') AS INTEGER
 UNION ALL
 SELECT thread_id, 'question:'||item_id, 1 FROM pending
 UNION ALL
-SELECT '', '', COALESCE((SELECT kind FROM tool),
- CASE WHEN (SELECT max(observed) FROM active) <= CAST(strftime('%s','now') AS INTEGER)-180 THEN 7 ELSE 2 END)
+SELECT '', '', CASE WHEN EXISTS (
+ SELECT 1 FROM thread_items i JOIN active a ON i.thread_id=a.thread_id AND i.turn_id=a.turn_id
+ WHERE i.item_type='contextCompaction' AND i.completed_at_ms IS NULL
+   AND i.started_at_ms > (CAST(strftime('%s','now') AS INTEGER)-300)*1000
+) THEN 8 ELSE COALESCE((SELECT kind FROM tool),
+ CASE WHEN (SELECT max(observed) FROM active) <= CAST(strftime('%s','now') AS INTEGER)-180 THEN 7 ELSE 2 END) END
 WHERE EXISTS(SELECT 1 FROM active)
 `
 
@@ -88,6 +92,8 @@ func projection(thread, id string, kind int) Event {
 	event := Event{Thread: thread, ID: id, Question: kind == 1, Activity: kind >= 2, Working: kind >= 2}
 	if kind == 7 {
 		event.Holding = true
+	} else if kind == 8 {
+		event.Tool = agentactivity.Compact
 	} else if event.Activity {
 		event.Tool = agentactivity.Tool(kind - 2)
 	}

@@ -10,7 +10,8 @@ const marks = document.images;
 const query = new URLSearchParams(location.search);
 const tool = query.get("tool") as BotLook | null;
 const cue = query.get("cue") as BotLook | null;
-const compact = tool || cue;
+const compacting = query.has("compact");
+const compact = tool || cue || compacting;
 const cell = compact ? 64 : 80, side = compact ? 43 : 54, count = 96, columns = 8;
 const idleFPS = 16, idleCount = 88;
 const asleep = query.has("sleep");
@@ -19,9 +20,9 @@ const work = query.has("work");
 const workFPS = 6, workCount = 104; // contiguous entrance + first steady cycle; final tile is held thinking
 const toolFPS = 8, toolCount = 40; // 4.5s: 3s of beats, 1.5s of rest
 const doneCount = 40;
-const keys = compact || asleep ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
+const keys = compacting ? ["openai", "claude"] : compact || asleep ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
 const wait = cue === "question" || cue === "permission";
-const frames = wait ? 40 : cue ? doneCount : tool ? toolCount : work ? workCount : idle ? idleCount : count;
+const frames = compacting ? 32 : wait ? 40 : cue ? doneCount : tool ? toolCount : work ? workCount : idle ? idleCount : count;
 const sheet = document.createElement("canvas");
 sheet.width = columns * cell;
 sheet.height = keys.length * frames / columns * cell;
@@ -54,6 +55,9 @@ async function record() {
       for (let i = 1; i <= start; i++) motion.step(i / frameRate);
       motion.set(botState({look: cue}), start / frameRate);
       lastSample = start / frameRate;
+    } else if (compacting) {
+      motion.set(botState({look: "compacting"}), 0);
+      frameRate = 8;
     } else if (work || tool) {
       motion.set(botState({look: tool ?? "thinking"}), 0);
       frameRate = tool ? toolFPS : workFPS;

@@ -32,6 +32,9 @@ var workData []byte
 //go:embed artwork/claude-work.atlas
 var claudeWorkData []byte
 
+//go:embed artwork/compact.atlas
+var compactData []byte
+
 //go:embed artwork/tool.atlas
 var toolData []byte
 

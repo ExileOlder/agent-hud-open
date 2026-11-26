@@ -22,13 +22,14 @@ const (
 	sheetPermission
 	sheetDone
 	sheetSleep
+	sheetCompact
 	sheetCount
 )
 
 var avatarData = [sheetCount][]byte{
 	hoverData, idleData, workData,
 	claudeHoverData, claudeIdleData, claudeWorkData,
-	toolData, cueQuestionData, cuePermissionData, cueDoneData, sleepData,
+	toolData, cueQuestionData, cuePermissionData, cueDoneData, sleepData, compactData,
 }
 
 const avatarIdleRetention = 2 * time.Minute
@@ -110,6 +111,8 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 	case frame >= cueBase:
 		sheet = sheetQuestion + avatarSheet((frame-cueBase)/cueFrames)
 		frame = (frame - cueBase) % cueFrames
+	case frame >= compactBase:
+		frame, sheet = frame-compactBase, sheetCompact
 	case frame >= toolBase:
 		frame, sheet = (frame-toolBase)%toolFrames, sheetTool
 	case frame >= workBase:
@@ -125,6 +128,9 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 		} else {
 			slot = 3
 		}
+	}
+	if sheet == sheetCompact && provider == 4 {
+		slot = 1
 	}
 	c.load(sheet, slot, now).Draw(dst, origin, frame)
 }

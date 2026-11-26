@@ -149,7 +149,7 @@ For automatic reminders, add the indicated hooks for the clients you use. **Merg
   timeout = 5
   ```
 
-- **[Claude Code](https://code.claude.com/docs/en/hooks):** in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`, use the same command handler for `Stop`, `StopFailure`, `SessionEnd`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, and `PostToolUseFailure`. Add the handler under `PreToolUse` without a matcher to track tool activity and questions. Replace the earlier HUD-only `AskUserQuestion` handler if present. Retain one Balance HUD entry per event and leave other client hooks in place. Example group for `PreToolUse`:
+- **[Claude Code](https://code.claude.com/docs/en/hooks):** in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`, use the same command handler for `Stop`, `StopFailure`, `SessionEnd`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, and `PostToolUseFailure`. Add `PreCompact` and `PostCompact` to show the separate compaction pose. Add the handler under `PreToolUse` without a matcher to track tool activity and questions. Replace the earlier HUD-only `AskUserQuestion` handler if present. Retain one Balance HUD entry per event and leave other client hooks in place. Example group for `PreToolUse`:
 
   ```json
   {"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed claude -hook","timeout":5}]}
