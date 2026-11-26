@@ -125,10 +125,14 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		busy = true
 		go func() { ready <- fetch() }()
 	}
-	var hideAt time.Time
+	var hideAt, peekAt time.Time
+	var peekProgress float64
+	var peekTarget bool
+	var tipRect rect
 	hide := func() {
 		hover = -1
-		hideAt = time.Time{}
+		hideAt, peekAt = time.Time{}, time.Time{}
+		peekTarget, peekProgress = false, 0
 		if tip != 0 {
 			u("ShowWindow", tip, 0)
 			u("KillTimer", tip, 2)
@@ -186,35 +190,83 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		u("SetWindowPos", bar, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(bar)
 	}
-	var tipWidth, tipHeight int32
-	peekShape := func(now time.Time) bool {
-		w, h := tipWidth, tipHeight
-		elapsed := float64(now.Sub(hoverStart)) / float64(180*time.Millisecond)
-		if p.ReduceMotion || elapsed >= 1 {
-			shape(tip, w, h, peekHeight)
-			return false
-		}
-		remain := .72 * math.Pow(1-max(0, elapsed), 3)
-		dx, dy := int32(math.Round(float64(w)*remain)), int32(math.Round(float64(h)*remain))
-		left, top, right, bottom := int32(0), int32(0), w, h
+	peekFrame := func(show bool) {
+		t := peekProgress
+		eased := t * t * (3 - 2*t)
+		delta := int32(math.Round(24 * (1 - eased)))
+		x, y := tipRect.Left, tipRect.Top
 		switch p.Edge {
 		case 0:
-			bottom = h - dy
+			y -= delta
 		case 1:
-			left = dx
+			x += delta
 		case 2:
-			top = dy
+			y += delta
 		case 3:
-			right = w - dx
+			x -= delta
 		}
-		region := g("CreateRoundRectRgn", 0, 0, uintptr(w+1), uintptr(h+1), peekHeight, peekHeight)
-		clip := g("CreateRectRgn", uintptr(left), uintptr(top), uintptr(right), uintptr(bottom))
-		g("CombineRgn", region, region, clip, 1)
-		g("DeleteObject", clip)
-		if u("SetWindowRgn", tip, region, 1) == 0 {
-			g("DeleteObject", region)
+		u("SetLayeredWindowAttributes", tip, 0, uintptr(math.Round(255*eased)), 2)
+		flags := uintptr(0x4 | 0x10)
+		if show {
+			flags |= 0x40
 		}
-		return true
+		u("SetWindowPos", tip, 0, uintptr(x), uintptr(y), uintptr(tipRect.Right-tipRect.Left), uintptr(tipRect.Bottom-tipRect.Top), flags)
+	}
+	peekGoal := func(shown bool, now time.Time) {
+		if hover < 0 || peekTarget == shown {
+			return
+		}
+		peekTarget = shown
+		if p.ReduceMotion {
+			if !shown {
+				hide()
+			} else {
+				peekProgress = 1
+			}
+			return
+		}
+		peekAt = now
+		u("SetTimer", tip, 2, 16, 0)
+	}
+	peekTick := func(now time.Time) {
+		if !hideAt.IsZero() && !now.Before(hideAt) {
+			hideAt = time.Time{}
+			peekGoal(false, now)
+		}
+		if peekAt.IsZero() {
+			if hideAt.IsZero() {
+				u("KillTimer", tip, 2)
+			}
+			return
+		}
+		elapsed := now.Sub(peekAt)
+		peekAt = now
+		if peekTarget {
+			peekProgress += float64(elapsed) / float64(300*time.Millisecond)
+			if peekProgress >= 1 {
+				peekProgress = 1
+				peekAt = time.Time{}
+			}
+		} else {
+			peekProgress -= float64(elapsed) / float64(235*time.Millisecond)
+			if peekProgress <= 0 {
+				hide()
+				return
+			}
+		}
+		peekFrame(false)
+	}
+	resumePeek := func() { hideAt = time.Time{}; peekGoal(true, time.Now()) }
+	scheduleHide := func() {
+		if hover < 0 {
+			return
+		}
+		if p.ReduceMotion {
+			hide()
+			return
+		}
+		hideAt = time.Now().Add(120 * time.Millisecond)
+		u("SetTimer", tip, 2, 16, 0)
 	}
 	details := func(i int) {
 		if i >= len(rows) || i < 0 {
@@ -229,7 +281,11 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				invalidate(bar)
 			}
 		}
+		fresh := hover < 0
 		hover = i
+		if fresh {
+			resumePeek()
+		}
 		w, h := int32(2*peekPad+gear), int32(peekHeight)
 		dc := u("GetDC", tip)
 		if dc != 0 {
@@ -264,11 +320,15 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		}
 		x = bound(x, area.Left, area.Right-w)
 		y = bound(y, area.Top, area.Bottom-h)
-		tipWidth, tipHeight = w, h
-		if peekShape(time.Now()) {
-			u("SetTimer", tip, 2, 16, 0)
+		if w != tipRect.Right-tipRect.Left || h != tipRect.Bottom-tipRect.Top {
+			shape(tip, w, h, peekHeight)
 		}
-		u("SetWindowPos", tip, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
+		tipRect = rect{x, y, x + w, y + h}
+		if fresh {
+			u("SetWindowPos", tip, ^uintptr(0), 0, 0, 0, 0, 0x1|0x2|0x10)
+			u("SetWindowPos", bar, ^uintptr(0), 0, 0, 0, 0, 0x1|0x2|0x10)
+		}
+		peekFrame(true)
 		invalidate(tip)
 	}
 	bg := g("CreateSolidBrush", 0x090705)
@@ -499,18 +559,16 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			switch msg {
 			case 0x113:
 				if wp == 2 {
-					if hover < 0 || !peekShape(time.Now()) {
-						u("KillTimer", tip, 2)
-					}
+					peekTick(time.Now())
 					return 0
 				}
 			case 0x200:
-				hideAt = time.Time{}
+				resumePeek()
 				event := track{Flags: 2, Window: tip}
 				event.Size = uint32(unsafe.Sizeof(event))
 				u("TrackMouseEvent", uintptr(unsafe.Pointer(&event)))
 			case 0x2a3:
-				hideAt = time.Now().Add(180 * time.Millisecond)
+				scheduleHide()
 			case 0x205:
 				hide()
 				invalidate(bar)
@@ -548,10 +606,6 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				}
 				return 0
 			case 0x113: // WM_TIMER
-				if !hideAt.IsZero() && time.Now().After(hideAt) {
-					hide()
-					invalidate(bar)
-				}
 				now := time.Now()
 				frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion)
 				if previousFrames != frames {
@@ -606,7 +660,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				return 0
 			case 0x200: // WM_MOUSEMOVE
 				m := mouse(lp)
-				hideAt = time.Time{}
+				resumePeek()
 				if pressing {
 					var cur point
 					if u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 && (outlined || math.Hypot(float64(cur.X-initial.X), float64(cur.Y-initial.Y)) >= 6) {
@@ -620,7 +674,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				}
 				return 0
 			case 0x2a3:
-				hideAt = time.Now().Add(180 * time.Millisecond)
+				scheduleHide()
 				return 0
 			case 0x201:
 				hide()
@@ -667,20 +721,20 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	if u("RegisterClassW", uintptr(unsafe.Pointer(&wc))) == 0 {
 		return fmt.Errorf("cannot register Win32 HUD window")
 	}
-	makeWindow := func(title string) uintptr {
-		return u("CreateWindowExW", 0x08000088, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(utf16(title))), 0x80000000, 0, 0, 1, 1, 0, 0, instance, 0)
+	makeWindow := func(title string, extra uintptr) uintptr {
+		return u("CreateWindowExW", 0x08000088|extra, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(utf16(title))), 0x80000000, 0, 0, 1, 1, 0, 0, instance, 0)
 	}
-	bar = makeWindow("Balance HUD")
+	bar = makeWindow("Balance HUD", 0)
 	if bar == 0 {
 		return fmt.Errorf("cannot create Win32 HUD window")
 	}
 	defer u("DestroyWindow", bar)
-	tip = makeWindow("Balance HUD quota details")
+	tip = makeWindow("Balance HUD quota details", 0x80000)
 	if tip == 0 {
 		return fmt.Errorf("cannot create Win32 quota popup")
 	}
 	defer u("DestroyWindow", tip)
-	notice = makeWindow("Balance HUD completion")
+	notice = makeWindow("Balance HUD completion", 0)
 	if notice == 0 {
 		return fmt.Errorf("cannot create Win32 completion popup")
 	}

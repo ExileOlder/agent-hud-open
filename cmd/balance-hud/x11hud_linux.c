@@ -1,6 +1,7 @@
 #include "x11hud.h"
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/Xatom.h>
 #include <X11/keysym.h>
 #include <X11/Xft/Xft.h>
 #include <X11/extensions/shape.h>
@@ -18,7 +19,7 @@ typedef struct { char label[96], value[192]; int tone; } PeekCell;
 struct Hud {
     Display *d;
     Window root, bar, tip, prefs;
-    Atom wm_delete;
+    Atom wm_delete, opacity;
     GC gc;
     XftFont *font, *heading, *prefs_font;
     XftDraw *tip_draw, *prefs_draw;
@@ -30,7 +31,9 @@ struct Hud {
     PeekCell prefs_rows[8];
     char prefs_help[192];
     unsigned long card_bg, side_bg, selected_bg;
-    long long leave_at, down_at, peek_started;
+    long long leave_at, down_at, peek_at;
+    double peek_progress;
+    int peek_target;
     unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
     int edge, numbers, hover, pressed, moved, outlined, down_x, down_y, grab_x, grab_y;
@@ -162,7 +165,7 @@ static void place(Hud *h) {
     draw(h);
 }
 static void hide_tip(Hud *h) {
-    h->hover=-1;h->leave_at=0;h->peek_started=0;
+    h->hover=-1;h->leave_at=0;h->peek_at=0;h->peek_progress=0;h->peek_target=0;
     XUnmapWindow(h->d,h->tip);
 }
 static int text_width(Hud *h, XftFont *font, const char *s) {
@@ -170,17 +173,41 @@ static int text_width(Hud *h, XftFont *font, const char *s) {
     XftTextExtentsUtf8(h->d,font,(const FcChar8*)s,strlen(s),&ext);
     return ext.xOff;
 }
-// Reveal the rounded pill from the edge it touches, easing toward the
-// full shape. No resize/move of the actual hit target or periodic repaint.
-static void peek_shape(Hud *h) {
-    int w=h->tip_w,v=h->tip_h;
-    double t=h->peek_started&&h->motion?(millis()-h->peek_started)/180.0:1;
-    if(t>=1){h->peek_started=0;shape(h,h->tip,w,v,peek_height/2,NULL);return;}
-    double remain=.72*(1-t)*(1-t)*(1-t);
-    int dx=lround(w*remain),dy=lround(v*remain);
-    XRectangle clip={h->edge==1?dx:0,h->edge==2?dy:0,
-        vertical(h)?w-dx:w,vertical(h)?v:v-dy};
-    shape(h,h->tip,w,v,peek_height/2,&clip);
+// Keep one reversible progress value. Native compositing blends the whole
+// capsule, including its text and gear, while the window slides under the bar.
+static void peek_frame(Hud *h) {
+    double t=h->peek_progress;
+    double eased=t*t*(3-2*t);
+    int delta=lround(24*(1-eased));
+    int dx=h->edge==1?delta:h->edge==3?-delta:0;
+    int dy=h->edge==2?delta:h->edge==0?-delta:0;
+    unsigned long alpha=lround(0xffffffffUL*eased);
+    XChangeProperty(h->d,h->tip,h->opacity,XA_CARDINAL,32,PropModeReplace,(unsigned char*)&alpha,1);
+    XMoveWindow(h->d,h->tip,h->tip_x+dx,h->tip_y+dy);
+}
+static void peek_goal(Hud *h,int shown,long long now) {
+    if(h->hover<0 || h->peek_target==shown)return;
+    h->peek_target=shown;
+    if(!h->motion){
+        if(!shown)hide_tip(h);
+        else {h->peek_progress=1;peek_frame(h);}
+        return;
+    }
+    h->peek_at=now;
+}
+static void peek_tick(Hud *h,long long now){
+    if(!h->peek_at)return;
+    int delta=now-h->peek_at;
+    if(delta<=0)return;
+    h->peek_at=now;
+    if(h->peek_target){
+        h->peek_progress+=delta/300.0;
+        if(h->peek_progress>=1){h->peek_progress=1;h->peek_at=0;}
+    }else{
+        h->peek_progress-=delta/235.0;
+        if(h->peek_progress<=0){hide_tip(h);return;}
+    }
+    peek_frame(h);
 }
 static void draw_tip(Hud *h) {
     if(h->hover<0)return;
@@ -199,10 +226,15 @@ static void draw_tip(Hud *h) {
     if(h->edge==3){x=h->x+h->w;y=h->y+pad+h->hover*item+(item-height)/2;}
     x=clamp(x,h->sx,h->sx+h->sw-width);
     y=clamp(y,h->sy,h->sy+h->sh-height);
+    if(h->tip_w!=width||h->tip_h!=height){
+        XResizeWindow(h->d,h->tip,width,height);
+        shape(h,h->tip,width,height,peek_height/2,NULL);
+    }
     h->tip_x=x;h->tip_y=y;h->tip_w=width;h->tip_h=height;
-    XMoveResizeWindow(h->d,h->tip,x,y,width,height);
-    peek_shape(h);
-    XMapRaised(h->d,h->tip);
+    peek_frame(h);
+    XMapWindow(h->d,h->tip);
+    XWindowChanges z={.sibling=h->bar,.stack_mode=Below};
+    XConfigureWindow(h->d,h->tip,CWSibling|CWStackMode,&z);
     XClearArea(h->d,h->tip,0,0,0,0,False);
         int tx=peek_pad;
         int baseline=(height+h->font->ascent-h->font->descent)/2;
@@ -223,7 +255,12 @@ static void pick(Hud *h, int x, int y) {
     if(i<0||i>=slots){hide_tip(h);return;}
     h->leave_at=0;
 
-    if(i!=h->hover){h->hover=i;h->peek_started=h->motion?millis():0;draw_tip(h);}
+    if(i!=h->hover){
+        if(h->hover<0)h->peek_progress=h->motion?0:1;
+        h->hover=i;
+        peek_goal(h,1,millis());
+        draw_tip(h);
+    }else peek_goal(h,1,millis());
 }
 static void drag(Hud *h,int x,int y) {
     h->moved=1;h->outlined=1;
@@ -352,6 +389,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XSizeHints hints={.flags=PMinSize|PMaxSize,.min_width=prefs_w,.min_height=prefs_h,.max_width=prefs_w,.max_height=prefs_h};
     XSetWMNormalHints(d,h->prefs,&hints);
     h->wm_delete=XInternAtom(d,"WM_DELETE_WINDOW",False);
+    h->opacity=XInternAtom(d,"_NET_WM_WINDOW_OPACITY",False);
     XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
     XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
     h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
@@ -388,7 +426,11 @@ void hud_peek(Hud *h,int slot,int n) {
     if(h->hover==slot)draw_tip(h);
 }
 int hud_step(Hud *h,int timeout) {
-    if(h->peek_started&&timeout>16)timeout=16;
+    if(h->peek_at&&timeout>16)timeout=16;
+    if(h->leave_at){
+        int wait=clamp(h->leave_at-millis(),0,timeout);
+        if(wait<timeout)timeout=wait;
+    }
     if(!XPending(h->d)){
         struct pollfd fd={.fd=ConnectionNumber(h->d),.events=POLLIN};
         poll(&fd,1,timeout);
@@ -416,8 +458,10 @@ int hud_step(Hud *h,int timeout) {
             if(e.xexpose.count==0 && e.xexpose.window==h->bar)draw(h);
             if(e.xexpose.count==0 && e.xexpose.window==h->tip)draw_tip(h);
             break;
-        case LeaveNotify:h->leave_at=millis()+180;break;
-        case EnterNotify:h->leave_at=0;break;
+        case LeaveNotify:
+            if(h->hover>=0)h->leave_at=millis()+(h->motion?120:0);
+            break;
+        case EnterNotify:h->leave_at=0;peek_goal(h,1,millis());break;
         case MotionNotify:
             if(h->pressed){
                 if(h->outlined||hypot(e.xmotion.x_root-h->down_x,e.xmotion.y_root-h->down_y)>=6)
@@ -453,11 +497,12 @@ int hud_step(Hud *h,int timeout) {
             break;
         }
     }
-    if(h->peek_started)peek_shape(h);
+    long long now=millis();
+    if(h->leave_at&&now>=h->leave_at){h->leave_at=0;peek_goal(h,0,now);}
+    peek_tick(h,now);
     if(h->pressed&&!h->outlined&&millis()-h->down_at>=300){
         h->outlined=1;draw(h);
     }
-    if(h->leave_at && millis()>=h->leave_at)hide_tip(h);
     XFlush(h->d);
     return 0;
 }
