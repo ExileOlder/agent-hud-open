@@ -140,15 +140,20 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	agyActivity := tools.antigravityActivity
 	agyWaits := tools.antigravityWaits
 	dshActivity := tools.deepSeekActivity
+	type mailLayout struct {
+		tail, panel                   mailRect
+		count, opened, rows, revision int
+	}
+	var placedMail mailLayout
+	paperShown := false
 	renderMail := func(now time.Time) {
 		var n [8]C.int
-		C.hud_mail_bounds(h, &n[0])
+		hidden := C.hud_mail_bounds(h, &n[0]) != 0
 		bar := mailRect{int(n[0]), int(n[1]), int(n[2]), int(n[3])}
 		screen := mailRect{int(n[4]), int(n[5]), int(n[6]), int(n[7])}
 		tail := inboxTail(bar, screen, p.Edge)
 		mail.fitRows(screen.h)
 		box := inboxPanel(tail, bar, screen, p.Edge, len(mail.visible()))
-		hidden := C.hud_drag_active(h) != 0
 		if revision != mail.revision {
 			for i, item := range mail.visible() {
 				title, value := C.CString(agentNames[item.agent]), C.CString(item.summary())
@@ -158,14 +163,18 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 			}
 			revision = mail.revision
 		}
-		count, opened := len(mail.items), C.int(0)
+		count, opened := len(mail.items), 0
 		if mail.open {
 			opened = 1
 		}
 		if hidden {
 			count, opened = 0, 0
 		}
-		C.hud_mail_sync(h, C.int(count), opened, C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h), C.int(len(mail.visible())))
+		layout := mailLayout{tail, box, count, opened, len(mail.visible()), revision}
+		if layout != placedMail {
+			C.hud_mail_sync(h, C.int(count), C.int(opened), C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h), C.int(layout.rows))
+			placedMail = layout
+		}
 		if len(mail.queue) > 0 && !hidden {
 			source := mail.sourceSlot(mail.queue[0], rows)
 			if source < 0 || source >= p.slotCount() {
@@ -178,8 +187,10 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 				poly[2*i], poly[2*i+1] = C.int(q.x+.5), C.int(q.y+.5)
 			}
 			C.hud_mail_flight(h, 1, C.int(pt.x)-paperSize/2, C.int(pt.y)-paperSize/2, &poly[0])
-		} else {
+			paperShown = true
+		} else if paperShown {
 			C.hud_mail_flight(h, 0, 0, 0, nil)
+			paperShown = false
 		}
 	}
 	timer := time.NewTicker(5 * time.Minute)
@@ -307,7 +318,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 			}
 		default:
 		}
-		if len(mail.queue) > 0 || len(mail.items) > 0 || revision != mail.revision {
+		if len(mail.queue) > 0 || len(mail.items) > 0 || revision != mail.revision || paperShown {
 			now := time.Now()
 			mail.advance(now, !p.ReduceMotion)
 			renderMail(now)

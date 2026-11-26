@@ -77,7 +77,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 		defer ticker.Stop()
 		dir := filepath.Join(home, deepSeekProjectionDir)
 		type cacheEntry struct {
-			modified                   time.Time
+			projection                 os.FileInfo
 			running                    bool
 			questionCount, questionSeq int
 			turnSeq, scannedSeq        int
@@ -105,13 +105,14 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 					session := strings.TrimSuffix(f.Name(), ".json")
 					old := cache[f.Name()]
 					c := old
-					if c.modified != info.ModTime() {
+					if c.projection == nil || !os.SameFile(c.projection, info) ||
+						c.projection.Size() != info.Size() || !c.projection.ModTime().Equal(info.ModTime()) {
 						view, ok := readDeepSeekProjection(filepath.Join(dir, f.Name()))
 						if !ok {
 							continue
 						}
 						rows := view.Record.Rows
-						c.modified = info.ModTime()
+						c.projection = info
 						c.openTurn = rows.Turn.Value.Open
 						c.running = c.openTurn != nil
 						c.approvalDisabled = rows.Approval.Value.Policy == "never"
@@ -125,7 +126,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 					terminal := 0
 					if !c.running && c.turnSeq > 0 && c.turnSeq != c.scannedSeq {
 						switch {
-						case old.modified.IsZero() && c.modified.Before(started) || now.Sub(c.modified) >= 2*time.Minute:
+						case old.projection == nil && info.ModTime().Before(started) || now.Sub(info.ModTime()) >= 2*time.Minute:
 							// Skip pre-existing history or terminal records that stayed unreadable.
 							c.scannedSeq = c.turnSeq
 						default:
@@ -136,7 +137,7 @@ func WatchDeepSeek(ctx context.Context, home string) <-chan DeepSeekStatus {
 					if c.running && !c.approvalDisabled {
 						turn = *c.openTurn
 					}
-					if c.running || c.log.compacting(now) || now.Sub(c.modified) < deepSeekCompactLifetime {
+					if c.running || c.log.compacting(now) || now.Sub(info.ModTime()) < deepSeekCompactLifetime {
 						ids, ending, found := c.log.watch(home, session, turn, terminal)
 						for _, id := range ids {
 							state.Approvals = append(state.Approvals, session+"/"+id)

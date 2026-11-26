@@ -24,8 +24,7 @@ unsigned int hud_hook_session(Hud *);
 
 void hud_slots(Hud *,int);
 
-void hud_mail_bounds(Hud *,int *);
+int hud_mail_bounds(Hud *,int *);
 void hud_mail_row(Hud *,int,const char *,const char *,int);
 void hud_mail_sync(Hud *,int,int,int,int,int,int,int,int,int);
 void hud_mail_flight(Hud *,int,int,int,const int *);
-int hud_drag_active(Hud *);

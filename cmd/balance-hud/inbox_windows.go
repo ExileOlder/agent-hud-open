@@ -9,13 +9,13 @@ import (
 
 type winMail struct {
 	mailInbox
-	badge, panel, paper        uintptr
-	lastTail, lastPanel        mailRect
-	lastCount, lastRevision    int
-	panelVisible, paperVisible bool
-	poly                       [6]point
-	leaveAt, clickAt           time.Time
-	lastRow, hot               int
+	badge, panel, paper            uintptr
+	lastTail, lastPanel, lastPaper mailRect
+	lastCount, lastRevision        int
+	panelVisible, paperVisible     bool
+	poly                           [6]point
+	leaveAt, clickAt               time.Time
+	lastRow, hot                   int
 }
 
 func rectToMail(r rect) mailRect {
@@ -196,16 +196,27 @@ func (m *winMail) draw(now time.Time, frame, area rect, p placement, rows []row,
 	}
 	_, _, step := barGeometry(p)
 	at, angle := m.flightAt(now, flightGeometry{bar, tail, screen, p.Edge, source, step})
+	var outline [6]point
 	for i, q := range paperPoints(angle) {
-		m.poly[i] = point{int32(math.Round(q.x)), int32(math.Round(q.y))}
+		outline[i] = point{int32(math.Round(q.x)), int32(math.Round(q.y))}
 	}
-	r := g("CreatePolygonRgn", uintptr(unsafe.Pointer(&m.poly[0])), 6, 2)
-	if r != 0 && u("SetWindowRgn", m.paper, r, 1) == 0 {
-		g("DeleteObject", r)
+	first, changed := !m.paperVisible, m.poly != outline
+	if first || changed {
+		m.poly = outline
+		r := g("CreatePolygonRgn", uintptr(unsafe.Pointer(&m.poly[0])), 6, 2)
+		if r != 0 && u("SetWindowRgn", m.paper, r, 1) == 0 {
+			g("DeleteObject", r)
+		}
 	}
-	showMailWindow(m.paper, mailRect{int(at.x) - paperSize/2, int(at.y) - paperSize/2, paperSize, paperSize})
+	bounds := mailRect{int(at.x) - paperSize/2, int(at.y) - paperSize/2, paperSize, paperSize}
+	if first || bounds != m.lastPaper {
+		showMailWindow(m.paper, bounds)
+		m.lastPaper = bounds
+	}
 	m.paperVisible = true
-	invalidate(m.paper)
+	if first || changed {
+		invalidate(m.paper)
+	}
 }
 func (m *winMail) windowAction(hwnd uintptr, msg uint32, wp, lp uintptr) (int, bool) {
 	if hwnd != m.badge && hwnd != m.panel {

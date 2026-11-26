@@ -43,7 +43,7 @@ struct Hud {
     long long click_at, mail_click_at, mail_leave_at;
     int click_slot, mail_count, mail_open, mail_row_click, mail_dirty, paper_shown;
     int mail_rect[4], mail_panel_rect[4];
-    int paper_xy[12];
+    int paper_xy[12], paper_x, paper_y, has_shape;
     PeekCell mail_rows[6];
     unsigned long mail_blue,mail_ring;
     unsigned long mail_fill,mail_row_bg,mail_hot_bg,mail_button,mail_rule;
@@ -97,7 +97,7 @@ static void paint_gear(Hud *h,int x,int y) {
     XFillArc(h->d,h->tip_bitmap,h->gc,x-4,y-4,8,8,0,360*64);
 }
 static void shape(Hud *h,Window w,int width,int height,int r,const XRectangle *clip){
-    if(!XShapeQueryExtension(h->d,&(int){0},&(int){0}))return;
+    if(!h->has_shape)return;
     XRectangle rects[512];
     int n=0;
     int radius=clamp(r,1,clamp(width,1,height)/2);
@@ -444,10 +444,10 @@ void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
 
 
 enum { mail_size=84, mail_header=72, mail_row=108, mail_card_gap=12, mail_text_gap=20, paper_size=44 };
-int hud_drag_active(Hud *h) {return h->pressed&&h->moved;}
-void hud_mail_bounds(Hud *h,int *rects) {
+int hud_mail_bounds(Hud *h,int *rects) {
     int values[]={h->x,h->y,h->w,h->height,h->sx,h->sy,h->sw,h->sh};
     memcpy(rects,values,sizeof(values));
+    return h->pressed&&h->moved;
 }
 static void mail_text(XftDraw *draw,XftColor *ink,XftFont *font,int x,int y,const char *text){
     XftDrawStringUtf8(draw,ink,font,x,y,(const FcChar8*)text,strlen(text));
@@ -584,19 +584,25 @@ static void draw_paper(Hud *h) {
 }
 void hud_mail_flight(Hud *h,int shown,int x,int y,const int *points){
     if(!shown){if(h->paper_shown)XUnmapWindow(h->d,h->paper);h->paper_shown=0;return;}
-    if(XShapeQueryExtension(h->d,&(int){0},&(int){0})){
-        XPoint poly[6];
-        for(int i=0;i<6;i++)poly[i]=(XPoint){points[2*i],points[2*i+1]};
-        Region r=XPolygonRegion(poly,6,WindingRule),input=XCreateRegion();
-        XShapeCombineRegion(h->d,h->paper,ShapeBounding,0,0,r,ShapeSet);
-        XShapeCombineRegion(h->d,h->paper,ShapeInput,0,0,input,ShapeSet);
-        XDestroyRegion(r);XDestroyRegion(input);
+    int changed=memcmp(h->paper_xy,points,sizeof(h->paper_xy))!=0;
+    if(changed){
+        memcpy(h->paper_xy,points,sizeof(h->paper_xy));
+        if(h->has_shape){
+            XPoint poly[6];
+            for(int i=0;i<6;i++)poly[i]=(XPoint){points[2*i],points[2*i+1]};
+            Region r=XPolygonRegion(poly,6,WindingRule);
+            XShapeCombineRegion(h->d,h->paper,ShapeBounding,0,0,r,ShapeSet);
+            XDestroyRegion(r);
+        }
     }
-    memcpy(h->paper_xy,points,sizeof(h->paper_xy));
-    XMoveResizeWindow(h->d,h->paper,x,y,paper_size,paper_size);
-    if(!h->paper_shown)XMapRaised(h->d,h->paper);
+    if(x!=h->paper_x||y!=h->paper_y){
+        XMoveWindow(h->d,h->paper,x,y);
+        h->paper_x=x;h->paper_y=y;
+    }
+    int first=!h->paper_shown;
+    if(first)XMapRaised(h->d,h->paper);
     h->paper_shown=1;
-    draw_paper(h);
+    if(first||changed)draw_paper(h);
 }
 
 Hud *hud_open(int edge, double offset, int numbers,int motion,int *already_running) {
@@ -611,6 +617,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion,int *already_runni
     Hud *h = calloc(1, sizeof(*h));
     if (!h) { XCloseDisplay(d); return NULL; }
     h->d=d; h->root=DefaultRootWindow(d);h->visible_slots=4;
+    h->has_shape=XShapeQueryExtension(d,&(int){0},&(int){0});
     h->edge=edge; h->offset=offset; h->numbers=numbers; h->hover=-1; h->motion=motion;
     h->sw=DisplayWidth(d,DefaultScreen(d)); h->sh=DisplayHeight(d,DefaultScreen(d));
     XRRScreenResources *res = XRRGetScreenResourcesCurrent(d,h->root);
@@ -641,8 +648,17 @@ Hud *hud_open(int edge, double offset, int numbers,int motion,int *already_runni
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
     h->mail_panel=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
-    h->paper=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
+    h->paper=XCreateWindow(d,h->root,0,0,paper_size,paper_size,0,CopyFromParent,InputOutput,
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
+    if(h->has_shape){
+        int major,minor;
+        if(XShapeQueryVersion(d,&major,&minor)&&(major>1||(major==1&&minor>=1))){
+            // The flying window ignores pointer input for its entire lifetime.
+            Region empty=XCreateRegion();
+            XShapeCombineRegion(d,h->paper,ShapeInput,0,0,empty,ShapeSet);
+            XDestroyRegion(empty);
+        }
+    }
     XStoreName(d,h->notice,"Balance HUD messages");
     XStoreName(d,h->mail_panel,"Balance HUD inbox");
     XStoreName(d,h->paper,"Balance HUD paper flight");

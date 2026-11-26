@@ -141,19 +141,27 @@ func TestDeepSeekTerminalAfterProjectionIsDeliveredOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	ch := WatchDeepSeek(ctx, home)
-	if got := <-ch; !got.Running {
-		t.Fatalf("open turn: %+v", got)
+	if got, ok := <-ch; !ok || !got.Running {
+		t.Fatalf("open turn: %+v, received=%t", got, ok)
+	}
+	first, err := os.Stat(projection)
+	if err != nil {
+		t.Fatal(err)
 	}
 	writeProjection(20, "null")
-	if got := <-ch; got.Running || got.Completed != 0 {
-		t.Fatalf("projection close fabricated a completion: %+v", got)
+	// Fast updates can have an identical timestamp on the client's filesystem.
+	if err := os.Chtimes(projection, first.ModTime(), first.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := <-ch; !ok || got.Running || got.Completed != 0 {
+		t.Fatalf("projection close: %+v, received=%t", got, ok)
 	}
 	end := fmt.Sprintf(`{"type":"turn/end","seq":20,"time":%d,"data":{"reason":{"kind":"completed"}}}`+"\n", time.Now().UnixMilli())
 	if err := os.WriteFile(log, enc.EncodeAll([]byte(end), open), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-ch; got.Running || got.Completed != 1 {
-		t.Fatalf("late terminal: %+v", got)
+	if got, ok := <-ch; !ok || got.Running || got.Completed != 1 {
+		t.Fatalf("late terminal: %+v, received=%t", got, ok)
 	}
 	select {
 	case got := <-ch:
