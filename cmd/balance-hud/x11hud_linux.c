@@ -599,9 +599,15 @@ void hud_mail_flight(Hud *h,int shown,int x,int y,const int *points){
     draw_paper(h);
 }
 
-Hud *hud_open(int edge, double offset, int numbers,int motion) {
+Hud *hud_open(int edge, double offset, int numbers,int motion,int *already_running) {
     Display *d = XOpenDisplay(NULL);
     if (!d) return NULL;
+    Atom completion=XInternAtom(d,"_BALANCE_HUD_COMPLETION",False);
+    if(XGetSelectionOwner(d,completion)!=None){
+        *already_running=1;
+        XCloseDisplay(d);
+        return NULL;
+    }
     Hud *h = calloc(1, sizeof(*h));
     if (!h) { XCloseDisplay(d); return NULL; }
     h->d=d; h->root=DefaultRootWindow(d);h->visible_slots=4;
@@ -685,7 +691,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     XSetWMNormalHints(d,h->prefs,&hints);
     h->wm_delete=XInternAtom(d,"WM_DELETE_WINDOW",False);
     h->opacity=XInternAtom(d,"_NET_WM_WINDOW_OPACITY",False);
-    h->completion=XInternAtom(d,"_BALANCE_HUD_COMPLETION",False);
+    h->completion=completion;
     XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
     XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
     h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
@@ -696,9 +702,19 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     for(int i=0;i<4;i++) XftColorAllocName(d,visual,cmap,ink[i],&h->tones[i]);
     const char *figures[]={"#a5aeb5","#87919a","#ff6878","#ffc55e","#2dd980"};
     for(int i=0;i<5;i++)XftColorAllocName(d,visual,cmap,figures[i],&h->number_ink[i]);
+    // The cheap check above covers ordinary relaunches. Serialize the
+    // final check/claim so two concurrent starts cannot steal the inbox.
+    XGrabServer(d);
+    if(XGetSelectionOwner(d,h->completion)!=None){
+        XUngrabServer(d);
+        *already_running=1;
+        hud_close(h);
+        return NULL;
+    }
+    XSetSelectionOwner(d,h->completion,h->bar,CurrentTime);
+    XUngrabServer(d);
     place(h);
     XMapRaised(d,h->bar);
-    XSetSelectionOwner(d,h->completion,h->bar,CurrentTime);
     XFlush(d);
     return h;
 }

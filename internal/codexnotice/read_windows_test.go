@@ -1,11 +1,12 @@
 package codexnotice
 
 import (
-	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"path/filepath"
 	"syscall"
 	"testing"
 	"unsafe"
+
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 )
 
 func TestWindowsReadsProjectionThroughSystemSQLite(t *testing.T) {
@@ -29,7 +30,8 @@ INSERT INTO thread_turns VALUES ('done-thread','done','completed',strftime('%s',
 INSERT INTO thread_turns VALUES ('question-thread','pending','inProgress',NULL,NULL,strftime('%s','now'));
 INSERT INTO thread_items VALUES ('question-thread','pending','question-item','agentMessage','{"questions":[{"title":"private"}]}',1,NULL,NULL,NULL);
 INSERT INTO thread_turns VALUES ('work-thread','running','inProgress',NULL,NULL,strftime('%s','now')-7200);
-INSERT INTO thread_items VALUES ('work-thread','running','tool','commandExecution','{}',1,strftime('%s','now')*1000,NULL,NULL);
+INSERT INTO thread_items VALUES ('work-thread','running','tool','commandExecution','{"status":"inProgress"}',1,(strftime('%s','now')-24)*1000,NULL,NULL);
+INSERT INTO thread_items VALUES ('work-thread','running','read','imageView','{}',2,strftime('%s','now')*1000,NULL,strftime('%s','now')*1000);
 INSERT INTO thread_turns VALUES ('stale-thread','stale','inProgress',NULL,NULL,strftime('%s','now')-7200);
 `)
 	if err != nil {
@@ -46,7 +48,7 @@ INSERT INTO thread_turns VALUES ('stale-thread','stale','inProgress',NULL,NULL,s
 	if len(events) != 3 ||
 		events[0] != (Event{Thread: "done-thread", ID: "done:done"}) ||
 		events[1] != (Event{Thread: "question-thread", ID: "question:question-item", Question: true}) ||
-		events[2] != (Event{Activity: true, Working: true, Tool: agentactivity.Command}) {
+		events[2] != (Event{Activity: true, Working: true, Tool: agentactivity.LongCommand}) {
 		t.Fatalf("wrong event projection: %+v", events)
 	}
 }

@@ -100,6 +100,18 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	// Keep the handle for the full native window lifetime. Console hook
+	// invocations do not enter runDesktop and can still send reminders.
+	mutex, _, winErr := kernel32.NewProc("CreateMutexW").Call(0, 0,
+		uintptr(unsafe.Pointer(utf16(`Local\ExileOlder.BalanceHUD`))))
+	if mutex == 0 {
+		return fmt.Errorf("open Balance HUD instance guard: %w", winErr)
+	}
+	defer kernel32.NewProc("CloseHandle").Call(mutex)
+	if winErr == syscall.ERROR_ALREADY_EXISTS ||
+		u("FindWindowW", uintptr(unsafe.Pointer(utf16("BalanceHUD"))), uintptr(unsafe.Pointer(utf16("Balance HUD")))) != 0 {
+		return nil
+	}
 	p := loadPlacement()
 	rows := view(nil)
 	var bar, tip, prefs uintptr

@@ -55,7 +55,11 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	if p.ReduceMotion {
 		motion = 0
 	}
-	h := C.hud_open(C.int(p.Edge), C.double(p.Offset), numbers, motion)
+	var alreadyRunning C.int
+	h := C.hud_open(C.int(p.Edge), C.double(p.Offset), numbers, motion, &alreadyRunning)
+	if alreadyRunning != 0 {
+		return nil
+	}
 	if h == nil {
 		return errors.New("cannot open X11 display")
 	}

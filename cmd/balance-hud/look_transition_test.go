@@ -79,3 +79,33 @@ func TestWorkingTransitionCompositesOneMarkWithoutChangingQuota(t *testing.T) {
 		}
 	}
 }
+
+func TestAllMarksEaseToLogoWhenActivityEnds(t *testing.T) {
+	var motion lookTransition
+	now := time.Now()
+	poses := markFrames{toolBase + 3, workBase + 2, pendingBase + 5, compactBase + 1, cueBase + 2*cueFrames + 12}
+	motion.visual(now, poses, false)
+	at := now.Add(time.Second)
+	for _, test := range []struct {
+		offset time.Duration
+		alpha  uint8
+	}{{0, 255}, {250 * time.Millisecond, 128}, {500 * time.Millisecond, 0}} {
+		visuals, active := motion.visual(at.Add(test.offset), markFrames{}, false)
+		for i, pose := range poses {
+			if visuals[i].oldOpacity != test.alpha || (test.alpha > 0 && visuals[i].previous != pose) {
+				t.Errorf("slot %d at %v: %+v", i, test.offset, visuals[i])
+			}
+		}
+		if active != (test.alpha > 0) {
+			t.Fatalf("animation kept running after the logo settled: %v", active)
+		}
+	}
+	// A new request takes over immediately rather than fading stale information above it.
+	motion.visual(now.Add(2*time.Second), poses, false)
+	motion.visual(now.Add(3*time.Second), markFrames{}, false)
+	next := markFrames{pendingBase + 1, workBase, 0, 0, 0}
+	got, _ := motion.visual(now.Add(3100*time.Millisecond), next, false)
+	if got[0] != (markVisual{frame: next[0]}) || got[1] != (markVisual{frame: next[1]}) {
+		t.Fatal("rest fade covered a new request or new work:", got)
+	}
+}

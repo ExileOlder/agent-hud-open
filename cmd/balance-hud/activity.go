@@ -291,6 +291,7 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 		r := &w.rest[slot]
 		if (slot == 1 || slot == 2) && !strings.EqualFold(r.identity, rows[slot].Identity) {
 			*r = markRest{identity: rows[slot].Identity, lastActivity: now}
+			w.looks[slot] = workLook{}
 		}
 		if age >= 0 {
 			r.lastActivity = now
@@ -333,7 +334,7 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 			want = agentactivity.Compact
 			owner = tool[slot].compactingAt
 		}
-		if want == agentactivity.Command && now.Sub(tool[slot].poseAt) >= 20*time.Second {
+		if slot >= 3 && want == agentactivity.Command && now.Sub(tool[slot].poseAt) >= 20*time.Second {
 			want = agentactivity.LongCommand
 		}
 		kind, phase := w.looks[slot].follow(now, owner, want)
@@ -379,6 +380,7 @@ func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement,
 			continue
 		}
 		w.rest[i].lastActivity, w.rest[i].nextVisit = now, time.Time{}
+		w.looks[i] = workLook{} // attention interrupts the previous working look
 		frame, anim := pendingFrame(now.Sub(cue.at), cue.look, p.ReduceMotion)
 		frames[i] = frame
 		active = active || anim

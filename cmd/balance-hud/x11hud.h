@@ -1,5 +1,5 @@
 typedef struct Hud Hud;
-Hud *hud_open(int edge, double offset, int numbers,int motion);
+Hud *hud_open(int edge, double offset, int numbers,int motion,int *already_running);
 void hud_close(Hud *h);
 void hud_cell(Hud *,int,int,const char *,const char *,int);
 void hud_peek(Hud *,int,int);

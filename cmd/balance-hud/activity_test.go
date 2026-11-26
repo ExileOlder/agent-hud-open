@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
+	"github.com/ExileOlder/agent-hud-open/internal/codexnotice"
 	"testing"
 	"time"
 )
@@ -178,5 +179,58 @@ func TestDeepSeekUsesOwnCompactionPoseWithoutACompletionNotice(t *testing.T) {
 	f, _ = w.frames(view(nil), later, now, now, -1, p)
 	if f[3] >= workBase || len(m.queue) != 0 {
 		t.Fatalf("compaction end faked work or a completion: %v, notices=%v", f, m.queue)
+	}
+}
+
+func TestProjectionActivityDoesNotPromoteOldCommandOrCarryAcrossAccounts(t *testing.T) {
+	var w workingMarks
+	var mail mailInbox
+	rows := view(nil)
+	rows[1].Identity, rows[2].Identity = "first", "second"
+	now := time.Now()
+	w.updateCodex(codexnotice.Event{Working: true, Tool: agentactivity.Command}, &mail, now)
+	w.updateAntigravity(map[string]agentactivity.Tool{"first": agentactivity.Command}, now)
+	first, _ := w.frames(rows, now, now, now, -1, placement{})
+	for i := range 2 {
+		if workLookForFrame(first[i]) != 4 {
+			t.Fatal(first)
+		}
+	}
+	later := now.Add(25 * time.Second)
+	w.frames(rows, later, now, now, -1, placement{})
+	later = later.Add(3 * time.Second)
+	still, _ := w.frames(rows, later, now, now, -1, placement{})
+	for i := range 2 {
+		if workLookForFrame(still[i]) != 4 {
+			t.Fatalf("slot %d inferred a long command solely from its animation timer: %v", i, still)
+		}
+	}
+	w.updateCodex(codexnotice.Event{Working: true, Tool: agentactivity.LongCommand}, &mail, later)
+	w.frames(rows, later, now, now, -1, placement{})
+	rows[1], rows[2] = rows[2], rows[1]
+	swapped, _ := w.frames(rows, later.Add(2*time.Second), now, now, -1, placement{})
+	if workLookForFrame(swapped[0]) != 5 || workLookForFrame(swapped[1]) != 0 || workLookForFrame(swapped[2]) != 4 {
+		t.Fatalf("truthful long command and account attribution: %v", swapped)
+	}
+}
+
+func TestReturningFromAttentionAppliesTheCurrentWorkImmediately(t *testing.T) {
+	var w workingMarks
+	var inbox mailInbox
+	rows := view(nil)
+	now := time.Now()
+	w.updateCodex(codexnotice.Event{Working: true, Tool: agentactivity.Command}, &inbox, now)
+	w.frames(rows, now, now, now, -1, placement{})
+	at := now.Add(time.Second)
+	w.updateCodex(codexnotice.Event{Working: true, Pending: true, Tool: agentactivity.Command}, &inbox, at)
+	waiting, _ := w.frames(rows, at, now, now, -1, placement{})
+	if waiting[0] < pendingBase {
+		t.Fatal(waiting)
+	}
+	at = at.Add(time.Second)
+	w.updateCodex(codexnotice.Event{Working: true, Tool: agentactivity.Read}, &inbox, at)
+	reading, _ := w.frames(rows, at, now, now, -1, placement{})
+	if reading[0] != toolBase {
+		t.Fatal("resolving a request re-used the old tool look:", reading)
 	}
 }

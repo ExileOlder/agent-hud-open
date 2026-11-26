@@ -25,7 +25,8 @@ apart. Thinking plays a contiguous entrance into the 15-second gaze, breath,
 and ellipsis period; subsequent cycles skip the entrance. A tool cycle keeps the original 3-second burst and
 1.5-second rest. The native sprite renderer uses the upstream 300 ms
 ease-out for working-look changes and interpolates only the character pixels;
-the quota ring and text stay fixed. The compaction frames use the original
+the quota ring and text stay fixed. Work and waiting poses return to their logos
+over the original 500 ms morph interval. The compaction frames use the original
 `compacting` look for Codex, Deepseek and Claude Code's procedural mark.
 The compact peek is a native adaptation of the Simple dock's AgentPeek layout.
 

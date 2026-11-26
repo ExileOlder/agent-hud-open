@@ -4,9 +4,10 @@ package codexnotice
 
 import (
 	"context"
-	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 	"path/filepath"
 	"time"
+
+	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
 )
 
 type Event struct {
@@ -61,15 +62,18 @@ tool AS (
       SELECT 1 FROM json_each(i.item_json,'$.commandActions') j
       WHERE json_extract(j.value,'$.type') IN ('read','listFiles','search')
     ) THEN 3
+    WHEN i.completed_at_ms IS NULL AND json_extract(i.item_json,'$.status')='inProgress'
+      AND coalesce(i.started_at_ms,i.created_at_ms)/1000 <= CAST(strftime('%s','now') AS INTEGER)-20 THEN 6
     ELSE 5 END
   ELSE 2 END AS kind
  FROM thread_items i JOIN active a ON i.thread_id=a.thread_id AND i.turn_id=a.turn_id
  WHERE i.item_type IN ('imageView','webSearch','fileChange','commandExecution')
   AND (
    coalesce(i.completed_at_ms,i.started_at_ms,i.created_at_ms)/1000 > CAST(strftime('%s','now') AS INTEGER)-10
-   OR json_extract(i.item_json,'$.status')='inProgress'
+   OR (i.completed_at_ms IS NULL AND json_extract(i.item_json,'$.status')='inProgress')
   )
- ORDER BY coalesce(i.started_at_ms,i.created_at_ms) DESC
+ ORDER BY (i.completed_at_ms IS NULL AND json_extract(i.item_json,'$.status') IS 'inProgress') DESC,
+          coalesce(i.started_at_ms,i.created_at_ms) DESC
  LIMIT 1
 )
 SELECT thread_id, 'done:'||turn_id, 0

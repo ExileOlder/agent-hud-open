@@ -13,6 +13,7 @@ type lookTransition struct {
 	moves [5]struct {
 		start time.Time
 		from  int
+		rest  bool
 	}
 }
 
@@ -47,18 +48,32 @@ func (t *lookTransition) visual(now time.Time, frames markFrames, reduced bool) 
 		before, after := workLookForFrame(t.last[i]), workLookForFrame(frame)
 		move := &t.moves[i]
 		switch {
+		case frame == 0 && t.last[i] >= workBase:
+			// BotMotion returns from a live pose to the logo over its regular
+			// 500 ms morph stride. Hold the outgoing frame while morphing.
+			move.start, move.from, move.rest = now, t.last[i], true
+		case frame == 0 && move.rest:
+			// Continue the return without restarting the clock.
 		case after == 0:
 			move.start = time.Time{}
 		case before != 0 && before != after:
-			move.start, move.from = now, t.last[i]
+			move.start, move.from, move.rest = now, t.last[i], false
+		case move.rest:
+			move.start = time.Time{}
 		}
 		if !move.start.IsZero() {
+			duration := lookHandoff
+			if move.rest {
+				duration = hoverExit
+			}
 			elapsed := now.Sub(move.start)
-			if elapsed < lookHandoff {
-				// 1 - easeOut(t) is the outgoing mark's contribution.
-				left := 1 - float64(elapsed)/float64(lookHandoff)
+			if elapsed < duration {
+				left := 1 - float64(elapsed)/float64(duration)
+				if !move.rest { // 1 - easeOut(t)
+					left *= left * left
+				}
 				out[i].previous = move.from
-				out[i].oldOpacity = uint8(255*left*left*left + .5)
+				out[i].oldOpacity = uint8(255*left + .5)
 				moving = moving || out[i].oldOpacity != 0
 			} else {
 				move.start = time.Time{}

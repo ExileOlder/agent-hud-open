@@ -135,6 +135,13 @@ func TestWindowsNativeSmoke(t *testing.T) {
 		inbox, paper = find("Balance HUD inbox"), find("Balance HUD paper flight")
 		return visible(bar) && tip != 0 && prefs != 0 && badge != 0 && inbox != 0 && paper != 0
 	})
+	reopenCtx, stopReopen := context.WithTimeout(ctx, 4*time.Second)
+	defer stopReopen()
+	reopen := exec.CommandContext(reopenCtx, exe, "-test.run=^TestWindowsNativeSmoke$")
+	reopen.Env = append(os.Environ(), "BALANCE_HUD_GUI_CHILD=1")
+	if output, err := reopen.CombinedOutput(); err != nil || !visible(bar) {
+		t.Fatalf("relaunch should leave the first native dock running: %v, %s", err, output)
+	}
 	if r := client(bar); r.Right != barItem || r.Bottom != 4*barItem+2*barPadding {
 		t.Fatalf("initial float geometry: %#v", r)
 	}
