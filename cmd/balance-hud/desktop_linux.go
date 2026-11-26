@@ -40,15 +40,14 @@ func runDesktop(fetch func() []result) error {
 	defer C.hud_close(h)
 	set := func(rows []row) {
 		for i, r := range rows {
-			mark, num, details := C.CString(r.Mark), C.CString(r.Number), C.CString(r.Details)
-			stale := C.int(0)
-			if r.Stale {
-				stale = 1
+			items := r.peekLine(i)
+			for j, cell := range items {
+				label, value := C.CString(cell.Label), C.CString(cell.Value)
+				C.hud_cell(h, C.int(i), C.int(j), label, value, C.int(cell.Tone))
+				C.free(unsafe.Pointer(label))
+				C.free(unsafe.Pointer(value))
 			}
-			C.hud_row(h, C.int(i), mark, num, details, C.int(r.Percent), stale)
-			C.free(unsafe.Pointer(mark))
-			C.free(unsafe.Pointer(num))
-			C.free(unsafe.Pointer(details))
+			C.hud_peek(h, C.int(i), C.int(len(items)))
 		}
 	}
 	rows := view(nil)
@@ -76,7 +75,7 @@ func runDesktop(fetch func() []result) error {
 	for {
 		timeout := 200
 		if !p.ReduceMotion && lastHover >= 0 && phase < 1 {
-			timeout = 16
+			timeout = 40
 		}
 		switch C.hud_step(h, C.int(timeout)) {
 		case 1:
@@ -106,7 +105,7 @@ func runDesktop(fetch func() []result) error {
 			phase = 0
 			dirty = true
 		} else if hover >= 0 && phase < 1 && !p.ReduceMotion {
-			phase = math.Min(1, phase+now.Sub(last).Seconds()*5)
+			phase = math.Min(1, phase+now.Sub(last).Seconds()/hoverSeconds)
 			dirty = true
 		}
 		if p.ReduceMotion {

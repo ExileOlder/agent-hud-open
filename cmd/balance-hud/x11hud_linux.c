@@ -12,24 +12,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { slots = 4, item = 70, wide = 120, pad = 7, line = 27 };
+enum { slots = 4, item = 92, wide = 148, pad = 4, peek_height = 64, peek_pad = 30, peek_gap = 12, peek_spacing = 30, gear = 45, max_cells = 8 };
+typedef struct { char label[96], value[192]; int tone; } PeekCell;
 struct Hud {
     Display *d;
     Window root, bar, tip;
     GC gc;
     XftFont *font, *heading;
     XftDraw *tip_draw;
-    XftColor text_color, muted_text, button_color;
+    XftColor text_color, muted_text, tones[4];
     Pixmap bitmap;
     int bw, bh;
-    int tip_x, tip_y, tip_w, tip_h, settings_top, settings, motion;
+    int tip_x, tip_y, tip_w, tip_h, settings, motion;
     long long leave_at;
-    unsigned long bg, fg, track, muted, accent[slots];
-    int percent[slots], stale[slots];
+    unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
     int edge, numbers, hover, pressed, moved, down_x, down_y;
     double offset;
-    char mark[slots][8], number[slots][16], details[slots][1024];
+    PeekCell cells[slots][max_cells];
+    int counts[slots];
 };
 
 static int clamp(int v, int min, int max) {
@@ -102,46 +103,45 @@ void hud_bitmap(Hud *h,int w,int height,const unsigned char *pixels){
 }
 static void place(Hud *h) {
     int v = vertical(h);
-    h->w = 2 * pad + (v ? (h->numbers ? wide : item) : slots * step(h));
+    h->w = v ? (h->numbers ? wide : item) : 2 * pad + slots * step(h);
     h->height = 2 * pad + (v ? slots * item : item);
     h->x = h->sx + (v ? (h->edge == 1 ? h->sw - h->w - 3 : 3)
                           : (int)((h->sw - h->w) * h->offset));
     h->y = h->sy + (v ? (int)((h->sh - h->height) * h->offset)
                           : (h->edge == 2 ? h->sh - h->height - 3 : 3));
     XMoveResizeWindow(h->d, h->bar, h->x, h->y, h->w, h->height);
-    shape(h,h->bar,h->w,h->height,42);
+    shape(h,h->bar,h->w,h->height,50);
     draw(h);
 }
 static void hide_tip(Hud *h) {
     h->hover=-1;h->leave_at=0;h->settings=0;
     XUnmapWindow(h->d,h->tip);
 }
+static int text_width(Hud *h, XftFont *font, const char *s) {
+    XGlyphInfo ext;
+    XftTextExtentsUtf8(h->d,font,(const FcChar8*)s,strlen(s),&ext);
+    return ext.xOff;
+}
 static void draw_tip(Hud *h) {
     if(h->hover<0)return;
-    const char *s=h->details[h->hover];
-    const char *lines[28];int lengths[28],count=0,longest=0;
-    while(*s&&count<28){
-        const char *end=strchr(s,'\n');
-        int n=end?(int)(end-s):(int)strlen(s);
-        lines[count]=s;lengths[count++]=n;
-        XGlyphInfo ext;
-        XftTextExtentsUtf8(h->d,h->font,(const FcChar8*)s,n,&ext);
-        longest=longest>ext.xOff?longest:ext.xOff;
-        if(!end)break;
-        s=end+1;
-    }
-    int width=clamp(longest+44,320,h->sw);
-    h->settings_top=43+line*(count>0?count-1:0);
-    int height=h->settings?342:h->settings_top+55;
-    int x=h->x,y=h->y+h->height;
-    if(h->edge==1){x=h->x-width;y=h->y+h->hover*item;}
+    int n=h->counts[h->hover];
+    PeekCell *cells=h->cells[h->hover];
+    int natural=2*peek_pad+gear;
+    for(int i=0;i<n;i++)
+        natural+=text_width(h,h->font,cells[i].label)+peek_gap+
+            text_width(h,h->heading,cells[i].value)+(i?peek_spacing:0);
+    int available=vertical(h)?h->sw-h->w-3:h->sw;
+    int width=clamp(h->settings?320:natural,1,available);
+    int height=h->settings?342:peek_height;
+    int x=h->x+h->hover*step(h)+(step(h)-width)/2,y=h->y+h->height;
+    if(h->edge==1){x=h->x-width;y=h->y+pad+h->hover*item+(item-height)/2;}
     if(h->edge==2)y=h->y-height;
-    if(h->edge==3){x=h->x+h->w;y=h->y+h->hover*item;}
+    if(h->edge==3){x=h->x+h->w;y=h->y+pad+h->hover*item+(item-height)/2;}
     x=clamp(x,h->sx,h->sx+h->sw-width);
     y=clamp(y,h->sy,h->sy+h->sh-height);
     h->tip_x=x;h->tip_y=y;h->tip_w=width;h->tip_h=height;
     XMoveResizeWindow(h->d,h->tip,x,y,width,height);
-    shape(h,h->tip,width,height,16);
+    shape(h,h->tip,width,height,h->settings?16:peek_height/2);
     XMapRaised(h->d,h->tip);
     XClearArea(h->d,h->tip,0,0,0,0,False);
     if(h->settings){
@@ -156,10 +156,19 @@ static void draw_tip(Hud *h) {
             label(h,24,yy+19,options[i],h->font,&h->text_color);
         }
     }else{
-        if(count>0)text(h,20,31,lines[0],lengths[0],h->heading,&h->text_color);
-        for(int i=1;i<count;i++)text(h,20,31+i*line,lines[i],lengths[i],h->font,&h->muted_text);
-        box(h,13,h->settings_top,width-26,38,h->track);
-        label(h,25,h->settings_top+24,"Settings  ›",h->heading,&h->button_color);
+        int tx=peek_pad;
+        int baseline=(height+h->font->ascent-h->font->descent)/2;
+        XRectangle clip={0,0,(unsigned short)(width-gear),height};
+        XftDrawSetClipRectangles(h->tip_draw,0,0,&clip,1);
+        for(int i=0;i<n;i++){
+            PeekCell *c=&cells[i];
+            label(h,tx,baseline,c->label,h->font,&h->muted_text);
+            tx+=text_width(h,h->font,c->label)+peek_gap;
+            label(h,tx,baseline,c->value,h->heading,&h->tones[c->tone]);
+            tx+=text_width(h,h->heading,c->value)+peek_spacing;
+        }
+        XftDrawSetClip(h->tip_draw,NULL);
+        label(h,width-gear+5,baseline,"⚙",h->heading,&h->text_color);
     }
 }
 static void pick(Hud *h, int x, int y) {
@@ -202,12 +211,9 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
         }
         XRRFreeScreenResources(res);
     }
-    h->bg=color(h,"#0d1116",BlackPixel(d,DefaultScreen(d)));
+    h->bg=color(h,"#050709",BlackPixel(d,DefaultScreen(d)));
     h->fg=color(h,"#e7eef5",WhitePixel(d,DefaultScreen(d)));
     h->track=color(h,"#1d2832",h->fg);
-    h->muted=color(h,"#9da8b4",h->fg);
-    const char *accent[]={"#72e5bd","#8fb8ff","#8fb8ff","#ffb877"};
-    for(int i=0;i<slots;i++)h->accent[i]=color(h,accent[i],h->fg);
     XSetWindowAttributes a={.override_redirect=True,.background_pixel=h->bg};
     h->bar=XCreateWindow(d,h->root,0,0,1,1,0,CopyFromParent,InputOutput,
         CopyFromParent,CWOverrideRedirect|CWBackPixel,&a);
@@ -222,13 +228,14 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     int screen=DefaultScreen(d);
     Visual *visual=DefaultVisual(d,screen);
     Colormap cmap=DefaultColormap(d,screen);
-    h->font=XftFontOpenName(d,screen,"sans:pixelsize=15");
-    h->heading=XftFontOpenName(d,screen,"sans:bold:pixelsize=17");
+    h->font=XftFontOpenName(d,screen,"sans:pixelsize=21");
+    h->heading=XftFontOpenName(d,screen,"sans:bold:pixelsize=21");
     h->tip_draw=XftDrawCreate(d,h->tip,visual,cmap);
     if(!h->font||!h->heading||!h->tip_draw){hud_close(h);return NULL;}
     XftColorAllocName(d,visual,cmap,"#f2f4f6",&h->text_color);
-    XftColorAllocName(d,visual,cmap,"#aebbc8",&h->muted_text);
-    XftColorAllocName(d,visual,cmap,"#90c9ff",&h->button_color);
+    XftColorAllocName(d,visual,cmap,"#878787",&h->muted_text);
+    const char *ink[]={"#f2f4f6","#2dd980","#ffc55e","#ff6878"};
+    for(int i=0;i<4;i++) XftColorAllocName(d,visual,cmap,ink[i],&h->tones[i]);
     place(h);
     XMapRaised(d,h->bar);
     XFlush(d);
@@ -243,15 +250,16 @@ void hud_close(Hud *h) {
     XCloseDisplay(h->d);
     free(h);
 }
-void hud_row(Hud *h,int i,const char *mark,const char *number,const char *details,int percent,int stale) {
-    if(i<0||i>=slots)return;
-    h->percent[i]=percent;h->stale[i]=stale;
-    snprintf(h->mark[i],sizeof(h->mark[i]),"%s",mark);
-    snprintf(h->number[i],sizeof(h->number[i]),"%s",number);
-    snprintf(h->details[i],sizeof(h->details[i]),"%s",details);
-    draw(h);
-    if(h->hover==i)draw_tip(h);
-    XFlush(h->d);
+void hud_cell(Hud *h,int slot,int index,const char *label,const char *value,int tone) {
+    if(slot<0||slot>=slots||index<0||index>=max_cells)return;
+    PeekCell *c=&h->cells[slot][index];
+    snprintf(c->label,sizeof(c->label),"%s",label);
+    snprintf(c->value,sizeof(c->value),"%s",value);
+    c->tone=clamp(tone,0,3);
+}
+void hud_peek(Hud *h,int slot,int n) {
+    h->counts[slot]=clamp(n,0,max_cells);
+    if(h->hover==slot)draw_tip(h);
 }
 int hud_step(Hud *h,int timeout) {
     if(!XPending(h->d)){
@@ -280,7 +288,7 @@ int hud_step(Hud *h,int timeout) {
                 if(e.xbutton.button==Button3){hide_tip(h);break;}
                 if(e.xbutton.button!=Button1)break;
                 int y=e.xbutton.y;
-                if(!h->settings && y>=h->settings_top && y<h->settings_top+38){
+                if(!h->settings && e.xbutton.x>=h->tip_w-gear){
                     h->settings=1;draw_tip(h);break;
                 }
                 if(h->settings && y>=72 && y<72+8*32){

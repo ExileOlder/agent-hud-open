@@ -6,3 +6,10 @@ The marks retain their respective owners' branding; this is not an endorsement.
 Go Regular and the image/font library are from golang.org/x/image (see
 LICENSE-Go-image-font.txt). Only these visual assets are included; the original
 chat and remote components are not required.
+
+`hover.png` contains 25-fps frames generated with the original HUD's BotMotion
+and renderBot (Apache-2.0). To regenerate, point
+`ESBUILD=esbuild BROWSER=chromium ./scripts/record-hover.sh /path/to/upstream/src`
+at the Agent HUD source containing `packages/hud/src/bots`. The native app
+plays the hover sequence once and holds its final frame until the pointer leaves.
+The compact peek is a native adaptation of the Simple dock's AgentPeek layout.

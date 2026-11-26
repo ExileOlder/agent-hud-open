@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,5 +41,20 @@ func TestMistralShowsAmountAndPercentOnSameLine(t *testing.T) {
 	rows := view([]result{{Provider: "mistral", Accounts: []quota.Account{{Label: "Mistral Vibe", Balance: "137.14 / 150.00 USD", Windows: []quota.Window{{Name: "Subscription", Remaining: 91.426666}}}}}})
 	if !strings.Contains(rows[3].Details, "137.14 / 150.00 USD (91.43% remaining)") {
 		t.Fatal(rows[3].Details)
+	}
+}
+
+func TestCompactPeekMatchesOriginalOrder(t *testing.T) {
+	items := accountPeek("antigravity", quota.Account{Label: "second@example.test", Windows: []quota.Window{
+		{Name: "Gemini Models weekly", Remaining: 93}, {Name: "Gemini Models 5h", Remaining: 86},
+		{Name: "Claude and GPT models weekly", Remaining: 100}, {Name: "Claude and GPT models 5h", Remaining: 100},
+	}})
+	want := []peekItem{{"Account", "second@example.test", 0}, {"Gemini 7d", "93%", 1}, {"Gemini 5h", "86%", 1}, {"3rd-party 7d", "100%", 1}, {"3rd-party 5h", "100%", 1}}
+	if !slices.Equal(items, want) {
+		t.Fatalf("got %+v", items)
+	}
+	mistral := accountPeek("mistral", quota.Account{Balance: "137.14 / 150.00 USD", Windows: []quota.Window{{Remaining: 91.426666}}})
+	if len(mistral) != 1 || mistral[0] != (peekItem{"Mistral", "$137.14 / $150.00 (91.43%)", 1}) {
+		t.Fatalf("got %+v", mistral)
 	}
 }

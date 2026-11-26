@@ -12,6 +12,7 @@ import (
 
 type row struct {
 	Segments              []int
+	Peek                  []peekItem
 	Mark, Number, Details string
 	Identity              string
 	Percent               int // -1 is unknown
@@ -44,6 +45,7 @@ func updateView(previous []row, results []result) []row {
 		}
 		n.Identity, n.Percent, n.Number, n.Stale = old.Identity, old.Percent, fmt.Sprintf("%d%%*", old.Percent), true
 		n.Segments = old.Segments
+		n.Peek = old.Peek
 		detail := old.Details
 		if k := strings.Index(detail, "\nLast reading —"); k >= 0 {
 			detail = detail[:k]
@@ -83,6 +85,7 @@ func view(results []result) []row {
 			}
 			a := r.Accounts[j]
 			dst.Identity = a.Label
+			dst.Peek = accountPeek(r.Provider, a)
 			lines := []string{a.Label}
 			if a.Balance != "" {
 				balance := a.Balance

@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"embed"
+	_ "embed"
 	"image"
 	"image/color"
 	"image/draw"
@@ -16,57 +16,27 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-//go:embed artwork/*.png
-var artwork embed.FS
+//go:embed artwork/hover.png
+var hoverPNG []byte
 
 const (
-	barPadding     = 7
-	barItem        = 70
-	barItemNumbers = 120
+	barPadding     = 4
+	barItem        = 92
+	barItemNumbers = 148
+	hoverFrames    = 40
+	hoverCell      = 80
+	hoverColumns   = 8
+	hoverSeconds   = float64(hoverFrames) / 25
 )
 
-var logos [4]image.Image
+var hoverAtlas image.Image
 var barFont font.Face
 
 func init() {
-	for i, name := range []string{"chatgpt", "antigravity", "antigravity", "deepseek"} {
-		if i == 2 {
-			logos[i] = logos[1]
-			continue
-		}
-		data, err := artwork.ReadFile("artwork/" + name + ".png")
-		if err != nil {
-			panic(err)
-		}
-		img, err := png.Decode(bytes.NewReader(data))
-		if err != nil {
-			panic(err)
-		}
-		// Remove transparent borders so visibly sized marks match the reference.
-		b := img.Bounds()
-		minX, minY, maxX, maxY := b.Max.X, b.Max.Y, b.Min.X, b.Min.Y
-		for y := b.Min.Y; y < b.Max.Y; y++ {
-			for x := b.Min.X; x < b.Max.X; x++ {
-				_, _, _, a := img.At(x, y).RGBA()
-				if a <= 256 {
-					continue
-				}
-				minX, minY, maxX, maxY = min(x, minX), min(y, minY), max(x+1, maxX), max(y+1, maxY)
-			}
-		}
-		w, h := maxX-minX, maxY-minY
-		extent := max(w, h)
-		trimmed := image.NewRGBA(image.Rect(0, 0, max(1, 128*w/extent), max(1, 128*h/extent)))
-		imagedraw.CatmullRom.Scale(trimmed, trimmed.Bounds(), img, image.Rect(minX, minY, maxX, maxY), draw.Src, nil)
-		if i == 0 { // upstream renders the OpenAI template in teal
-			for y := 0; y < trimmed.Bounds().Dy(); y++ {
-				for x := 0; x < trimmed.Bounds().Dx(); x++ {
-					a := trimmed.RGBAAt(x, y).A
-					trimmed.Set(x, y, color.NRGBA{0x10, 0xa3, 0x7f, a})
-				}
-			}
-		}
-		logos[i] = trimmed
+	var err error
+	hoverAtlas, err = png.Decode(bytes.NewReader(hoverPNG))
+	if err != nil {
+		panic(err)
 	}
 	parsed, e := opentype.Parse(goregular.TTF)
 	if e != nil {
@@ -90,7 +60,7 @@ func barGeometry(p placement) (w, h, step int) {
 	if p.Numbers {
 		w = barItemNumbers
 	}
-	return w + 2*barPadding, 2*barPadding + 4*barItem, step
+	return w, 2*barPadding + 4*barItem, step
 }
 
 // Native display draw calls consume an opaque BGRA image; window shapes
@@ -104,7 +74,7 @@ func paintBar(rows []row, p placement, hover int, phase float64, dst *image.RGBA
 	for i, r := range rows {
 		left, top := barPadding+i*step, barPadding
 		if p.Edge%2 != 0 {
-			left, top = barPadding, barPadding+i*barItem
+			left, top = 0, barPadding+i*barItem
 		}
 		cx, cy := left+barItem/2, top+barItem/2
 		q := color.RGBA{55, 66, 76, 255}
@@ -120,71 +90,62 @@ func paintBar(rows []row, p placement, hover int, phase float64, dst *image.RGBA
 				q = color.RGBA{45, 217, 128, 255}
 			}
 		}
-		glow := 0.0
-		if hover == i {
-			glow = phase
-		}
-		angles := []float64{0}
+
+		const radius, halfStroke = 28.5, 3.3
+		parts := 1
 		if i == 1 || i == 2 {
-			angles = []float64{0, 90, 180, 270}
+			parts = 4
 		}
+		span := 2 * math.Pi / float64(parts)
 		for yy := cy - 33; yy <= cy+33; yy++ {
 			for xx := cx - 33; xx <= cx+33; xx++ {
 				dx, dy := float64(xx-cx)+.5, float64(yy-cy)+.5
 				rad := math.Hypot(dx, dy)
-				px := dst.RGBAAt(xx, yy)
-				if glow > 0 {
-					px = blend(px, color.RGBA{33, 41, 45, 255}, glow*clamp01((34-rad)/4))
+				if math.Abs(rad-radius) >= halfStroke+.5 {
+					continue
 				}
-				ring := clamp01(2.7 - math.Abs(rad-27.5))
-				if ring > 0 {
-					a := math.Atan2(dx, -dy) * 180 / math.Pi
-					if a < 0 {
-						a += 360
+				angle := math.Atan2(dx, -dy)
+				if angle < 0 {
+					angle += 2 * math.Pi
+				}
+				part := min(parts-1, int(angle/span))
+				off := angle - float64(part)*span
+				gap, percent := 0.0, r.Percent
+				if parts > 1 {
+					gap = .17
+					percent = -1
+					if part < len(r.Segments) {
+						percent = r.Segments[part]
 					}
-					segment := min(len(angles)-1, int(a/360*float64(len(angles))))
-					offset := a - angles[segment]
-					percent := r.Percent
-					if len(angles) > 1 {
-						percent = -1
-						if segment < len(r.Segments) {
-							percent = r.Segments[segment]
-						}
+				}
+				coverage := func(delta float64) float64 {
+					d := math.Abs(rad - radius)
+					if delta > 0 {
+						d = math.Sqrt(d*d + 2*rad*radius*(1-math.Cos(delta)))
 					}
-					span := 360 / float64(len(angles))
-					gap := 0.0
-					if len(angles) > 1 {
-						gap = 5
+					return clamp01(halfStroke + .5 - d)
+				}
+				px := blend(dst.RGBAAt(xx, yy), color.RGBA{30, 32, 33, 255}, coverage(max(gap-off, off-(span-gap))))
+				if percent > 0 {
+					fill := gap + float64(percent)*(span-2*gap)/100
+					delta := max(gap-off, off-fill)
+					if parts == 1 {
+						delta = min(delta, 2*math.Pi-off, off+2*math.Pi-fill)
 					}
-					track := 1.0
-					if gap > 0 {
-						track = clamp01((math.Min(offset, span-offset)-gap)/2 + .5)
-					}
-					px = blend(px, color.RGBA{33, 41, 45, 255}, ring*track)
-					if percent > 0 {
-						active := 1.0
-						if percent < 100 {
-							cutoff := gap + float64(percent)*(span-2*gap)/100
-							active = clamp01((cutoff-offset)/2 + .5)
-						}
-						px = blend(px, q, ring*track*active)
-					}
+					px = blend(px, q, coverage(delta))
 				}
 				dst.SetRGBA(xx, yy, px)
 			}
 		}
-		size := int(math.Round(34 + 4*glow))
-		src := logos[i]
-		if src.Bounds().Dx() > 0 && src.Bounds().Dy() > 0 {
-			iw, ih := size, size
-			if src.Bounds().Dx() > src.Bounds().Dy() {
-				ih = size * src.Bounds().Dy() / src.Bounds().Dx()
-			} else {
-				iw = size * src.Bounds().Dx() / src.Bounds().Dy()
-			}
-			x, y := cx-iw/2, cy-ih/2
-			imagedraw.CatmullRom.Scale(dst, image.Rect(x, y, x+iw, y+ih), src, src.Bounds(), draw.Over, nil)
+		slot := [...]int{0, 1, 1, 2}[i]
+		frame := 0
+		if hover == i && !p.ReduceMotion {
+			frame = min(hoverFrames-1, int(phase*hoverFrames))
 		}
+		x := frame % hoverColumns * hoverCell
+		y := (slot*hoverFrames/hoverColumns + frame/hoverColumns) * hoverCell
+		imagedraw.CatmullRom.Scale(dst, image.Rect(cx-29, cy-29, cx+29, cy+29),
+			hoverAtlas, image.Rect(x, y, x+hoverCell, y+hoverCell), draw.Over, nil)
 		if p.Numbers {
 			ink := q
 			if r.Percent < 0 {

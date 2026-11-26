@@ -115,7 +115,20 @@ func runDesktop(fetch func() []result) error {
 		}
 	}
 	var barImage *image.RGBA
-	var detailsButton int32
+	const peekHeight, peekPad, peekGap, peekSpacing, gear = 64, 30, 12, 30, 45
+	measure := func(dc uintptr, s string) int32 {
+		t := syscall.StringToUTF16(strings.ReplaceAll(s, "\x00", ""))
+		var size point
+		g("GetTextExtentPoint32W", dc, uintptr(unsafe.Pointer(&t[0])), uintptr(len(t)-1), uintptr(unsafe.Pointer(&size)))
+		return size.X
+	}
+	font := func(weight uintptr) uintptr {
+		name := utf16("Segoe UI")
+		return g("CreateFontW", ^uintptr(20), 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, uintptr(unsafe.Pointer(name)))
+	}
+	labelFont, valueFont := font(400), font(600)
+	defer g("DeleteObject", labelFont)
+	defer g("DeleteObject", valueFont)
 	hoverStart := time.Now()
 	var motionAnimating bool
 
@@ -138,7 +151,7 @@ func runDesktop(fetch func() []result) error {
 			x = area.Left + 3
 		}
 		frame = rect{x, y, x + w, y + h}
-		shape(bar, w, h, 84)
+		shape(bar, w, h, 100)
 		u("SetWindowPos", bar, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(bar)
 	}
@@ -151,38 +164,58 @@ func runDesktop(fetch func() []result) error {
 			hoverStart = time.Now()
 			if !p.ReduceMotion {
 				motionAnimating = true
-				u("SetTimer", bar, 1, 16, 0)
+				u("SetTimer", bar, 1, 40, 0)
 				invalidate(bar)
 			}
 		}
 		hover = i
-		lines := strings.Split(rows[i].Details, "\n")
-		detailsButton = int32(43 + 27*(len(lines)-1))
-		w, h := int32(320), detailsButton+55
+		w, h := int32(2*peekPad+gear), int32(peekHeight)
 		if settings {
-			h = 342
+			w, h = 320, 342
+		} else {
+			dc := u("GetDC", tip)
+			if dc != 0 {
+				old := g("SelectObject", dc, labelFont)
+				for j, cell := range rows[i].peekLine(i) {
+					g("SelectObject", dc, labelFont)
+					w += measure(dc, cell.Label) + peekGap
+					g("SelectObject", dc, valueFont)
+					w += measure(dc, cell.Value)
+					if j != 0 {
+						w += peekSpacing
+					}
+				}
+				g("SelectObject", dc, old)
+				u("ReleaseDC", tip, dc)
+			}
 		}
-		for _, s := range lines {
-			w = max(w, int32(len([]rune(s))*9+44))
+		available := area.Right - area.Left
+		if p.Edge%2 != 0 {
+			available -= frame.Right - frame.Left + 3
 		}
-		w = min(w, area.Right-area.Left)
+		w = min(w, available)
 		h = min(h, area.Bottom-area.Top)
-		x, y := frame.Left, frame.Bottom
+		_, _, step := dimensions()
+		x, y := frame.Left+int32(i)*step+(step-w)/2, frame.Bottom
 		switch p.Edge {
 		case 1:
-			x, y = frame.Left-w, frame.Top+int32(hover)*barItem
+			x, y = frame.Left-w, frame.Top+barPadding+int32(i)*barItem+(barItem-h)/2
 		case 2:
 			y = frame.Top - h
 		case 3:
-			x, y = frame.Right, frame.Top+int32(hover)*barItem
+			x, y = frame.Right, frame.Top+barPadding+int32(i)*barItem+(barItem-h)/2
 		}
 		x = bound(x, area.Left, area.Right-w)
 		y = bound(y, area.Top, area.Bottom-h)
-		shape(tip, w, h, 32)
+		if settings {
+			shape(tip, w, h, 32)
+		} else {
+			shape(tip, w, h, peekHeight)
+		}
 		u("SetWindowPos", tip, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(tip)
 	}
-	bg := g("CreateSolidBrush", 0x16110d)
+	bg := g("CreateSolidBrush", 0x090705)
 	button := g("CreateSolidBrush", 0x32281d)
 	if bg == 0 || button == 0 {
 		return fmt.Errorf("cannot create HUD panel brushes")
@@ -244,16 +277,26 @@ func runDesktop(fetch func() []result) error {
 					barButton(72+int32(i)*32, label)
 				}
 			} else {
-				for i, s := range strings.Split(rows[hover].Details, "\n") {
-					write(dc, 20, 13+int32(i*27), s, 0xf5eee7)
+				x := int32(peekPad)
+				y := (r.Bottom - 25) / 2
+				tones := [...]uintptr{0xf6f4f2, 0x80d92d, 0x5ec5ff, 0x7868ff}
+				g("IntersectClipRect", dc, 0, 0, uintptr(r.Right-gear), uintptr(r.Bottom))
+				for _, cell := range rows[hover].peekLine(hover) {
+					g("SelectObject", dc, labelFont)
+					write(dc, x, y, cell.Label, 0x878787)
+					x += measure(dc, cell.Label) + peekGap
+					g("SelectObject", dc, valueFont)
+					write(dc, x, y, cell.Value, tones[cell.Tone])
+					x += measure(dc, cell.Value) + peekSpacing
 				}
-				barButton(detailsButton, "Settings  ›")
+				g("SelectClipRgn", dc, 0)
+				write(dc, r.Right-gear+5, y, "⚙", 0xf6f4f2)
 			}
 			return
 		}
 		phase := 0.0
 		if hover >= 0 && !p.ReduceMotion {
-			phase = clamp01(time.Since(hoverStart).Seconds() * 5)
+			phase = clamp01(time.Since(hoverStart).Seconds() / hoverSeconds)
 		}
 		barImage = paintBar(rows, p, hover, phase, barImage)
 		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
@@ -335,8 +378,11 @@ func runDesktop(fetch func() []result) error {
 				invalidate(bar)
 				return 0
 			case 0x202:
-				y := mouse(lp).Y
-				if !settings && y >= detailsButton && y < detailsButton+38 {
+				m := mouse(lp)
+				y := m.Y
+				var bounds rect
+				u("GetClientRect", tip, uintptr(unsafe.Pointer(&bounds)))
+				if !settings && m.X >= bounds.Right-gear {
 					settings = true
 					details(hover)
 					return 0
@@ -396,7 +442,7 @@ func runDesktop(fetch func() []result) error {
 				}
 				if motionAnimating {
 					invalidate(bar)
-					if hover < 0 || p.ReduceMotion || time.Since(hoverStart) > 200*time.Millisecond {
+					if hover < 0 || p.ReduceMotion || time.Since(hoverStart).Seconds() >= hoverSeconds {
 						motionAnimating = false
 						u("SetTimer", bar, 1, 200, 0)
 					}
