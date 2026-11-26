@@ -435,7 +435,7 @@ void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
 }
 
 
-enum { mail_size=84, mail_header=72, mail_row=108, paper_size=44 };
+enum { mail_size=84, mail_header=72, mail_row=108, mail_card_gap=12, mail_text_gap=20, paper_size=44 };
 int hud_drag_active(Hud *h) {return h->pressed&&h->moved;}
 void hud_mail_bounds(Hud *h,int *rects) {
     int values[]={h->x,h->y,h->w,h->height,h->sx,h->sy,h->sw,h->sh};
@@ -476,7 +476,7 @@ static int mail_target(Hud*h,int x,int y) {
     if(x>=width-198&&x<width-22&&y>=14&&y<59)return 92;
     if(x<16||x>=width-16||y<mail_header)return 0;
     int row=(y-mail_header)/mail_row,inside=(y-mail_header)%mail_row;
-    if(row>=h->mail_displayed||inside>=mail_row-12)return 0;
+    if(row>=h->mail_displayed||inside>=mail_row-mail_card_gap)return 0;
     if(x>=width-88&&x<width-29&&inside>=20&&inside<78)return 320+row;
     return 300+row;
 }
@@ -498,7 +498,7 @@ static void draw_mail_panel(Hud *h) {
         PeekCell*row=&h->mail_rows[i];
         int tone=clamp(row->tone,0,2);
         int hover=h->mail_hot==300+i||h->mail_hot==320+i;
-        mail_rounded(h,16,y,width-32,mail_row-12,15,hover?h->mail_hot_bg:h->mail_row_bg);
+        mail_rounded(h,16,y,width-32,mail_row-mail_card_gap,15,hover?h->mail_hot_bg:h->mail_row_bg);
         y-=6;
         mail_rounded(h,30,y+28,52,52,13,h->mail_tile[tone]);
         XSetForeground(h->d,h->gc,h->mail_accent[tone]);
@@ -512,8 +512,13 @@ static void draw_mail_panel(Hud *h) {
         }
         XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
         if(tone==1)mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,56-text_width(h,h->mail_small,"?")/2,y+62,"?");
-        mail_text(h->mail_draw,&h->text_color,h->mail_title,106,y+39,row->label);
-        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,106,y+79,row->value);
+        XGlyphInfo title,status;
+        XftTextExtentsUtf8(h->d,h->mail_title,(const FcChar8*)row->label,strlen(row->label),&title);
+        XftTextExtentsUtf8(h->d,h->mail_small,(const FcChar8*)row->value,strlen(row->value),&status);
+        // Center the visible two-line block rather than the font line boxes.
+        int top=y+6+(mail_row-mail_card_gap-title.height-mail_text_gap-status.height)/2;
+        mail_text(h->mail_draw,&h->text_color,h->mail_title,106,top+title.y,row->label);
+        mail_text(h->mail_draw,&h->mail_status[tone],h->mail_small,106,top+title.height+mail_text_gap+status.y,row->value);
         int close_x=width-58,close_y=y+55;
         if(h->mail_hot==320+i)mail_rounded(h,width-88,y+26,59,58,12,h->mail_button);
         XSetForeground(h->d,h->gc,h->mail_hot==320+i?h->fg:h->mail_ring);

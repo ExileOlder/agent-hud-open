@@ -46,7 +46,8 @@ func drawMailStroke(dc, rgb, width uintptr, lines ...[4]int32) {
 	g("SelectObject", dc, old)
 	g("DeleteObject", pen)
 }
-func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int32, string, uintptr), labelFont, mailSmall, mailTitle, bgBrush uintptr, measure func(uintptr, string) int32) {
+func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int32, string, uintptr), labelFont, mailSmall, mailTitle, bgBrush uintptr, extent func(uintptr, string) point) {
+	measure := func(dc uintptr, text string) int32 { return extent(dc, text).X }
 	switch hwnd {
 	case m.badge:
 		g("SelectObject", dc, labelFont)
@@ -110,10 +111,13 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 			case 2:
 				drawMailStroke(dc, accents[tone], 3, [4]int32{56, y + 42, 56, y + 56}, [4]int32{56, y + 61, 56, y + 64})
 			}
+			const lineAdvance = 46
+			status := item.summary()
+			textY := y + 6 + (mailRow-12-lineAdvance-extent(dc, status).Y)/2
 			g("SelectObject", dc, mailTitle)
-			write(dc, 106, y+10, agentNames[item.agent], 0xf6f4f2)
+			write(dc, 106, textY, agentNames[item.agent], 0xf6f4f2)
 			g("SelectObject", dc, mailSmall)
-			write(dc, 106, y+56, item.summary(), mailRGB(accents[tone]))
+			write(dc, 106, textY+lineAdvance, status, mailRGB(accents[tone]))
 			x, cy := width-58, y+55
 			closeInk := uintptr(0x74787b)
 			if m.hot == mailDismissBase+i {

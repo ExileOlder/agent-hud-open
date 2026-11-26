@@ -155,12 +155,13 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	}
 	var barImage *image.RGBA
 	const peekHeight, peekPad, peekGap, peekSpacing, gear = 64, 30, 12, 30, 45
-	measure := func(dc uintptr, s string) int32 {
+	extent := func(dc uintptr, s string) point {
 		t := syscall.StringToUTF16(strings.ReplaceAll(s, "\x00", ""))
 		var size point
 		g("GetTextExtentPoint32W", dc, uintptr(unsafe.Pointer(&t[0])), uintptr(len(t)-1), uintptr(unsafe.Pointer(&size)))
-		return size.X
+		return size
 	}
+	measure := func(dc uintptr, s string) int32 { return extent(dc, s).X }
 	font := func(weight uintptr, size uintptr) uintptr {
 		name := utf16("Segoe UI")
 		return g("CreateFontW", ^size, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, uintptr(unsafe.Pointer(name)))
@@ -411,7 +412,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			defer g("SelectObject", dc, old)
 		}
 		if hwnd == mail.badge || hwnd == mail.panel || hwnd == mail.paper {
-			mail.renderWindow(hwnd, dc, write, prefsFont, mailSmall, mailTitle, sideBG, measure)
+			mail.renderWindow(hwnd, dc, write, prefsFont, mailSmall, mailTitle, sideBG, extent)
 			return
 		}
 		if hwnd == prefs {
