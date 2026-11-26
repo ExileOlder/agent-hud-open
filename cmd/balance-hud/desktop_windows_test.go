@@ -202,8 +202,8 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	wait("flight did not land at dock inbox", func() bool { return visible(badge) && !visible(paper) })
 	post(badge, 0x202, 0, 40, 40)
 	wait("dock inbox did not open independently", func() bool { return visible(inbox) })
-	post(inbox, 0x202, 0, client(inbox).Right-18, 23)
-	wait("clear did not close badge and inbox", func() bool { return !visible(badge) && !visible(inbox) })
+	post(inbox, 0x202, 0, client(inbox).Right-40, mailHeader+29)
+	wait("single-row dismiss did not close the empty badge and inbox", func() bool { return !visible(badge) && !visible(inbox) })
 	if err := notifyHook(ctx, 5, 0); err != nil {
 		t.Fatal(err)
 	}

@@ -118,7 +118,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		if revision != mail.revision {
 			for i, item := range mail.visible() {
 				title, value := C.CString(agentNames[item.agent]), C.CString(item.summary())
-				C.hud_mail_row(h, C.int(i), title, value)
+				C.hud_mail_row(h, C.int(i), title, value, C.int(item.tone()))
 				C.free(unsafe.Pointer(title))
 				C.free(unsafe.Pointer(value))
 			}

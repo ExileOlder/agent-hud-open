@@ -15,7 +15,7 @@ type winMail struct {
 	panelVisible, paperVisible bool
 	poly                       [6]point
 	leaveAt, clickAt           time.Time
-	lastRow                    int
+	lastRow, hot               int
 }
 
 func rectToMail(r rect) mailRect {
@@ -24,9 +24,27 @@ func rectToMail(r rect) mailRect {
 func showMailWindow(w uintptr, r mailRect) {
 	u("SetWindowPos", w, ^uintptr(0), uintptr(r.x), uintptr(r.y), uintptr(r.w), uintptr(r.h), 0x10|0x40)
 }
-func fillMailRect(dc uintptr, x, y, w, h int32, brush uintptr) {
-	rc := rect{x, y, x + w, y + h}
-	u("FillRect", dc, uintptr(unsafe.Pointer(&rc)), brush)
+func mailRGB(rgb uintptr) uintptr {
+	return (rgb&0xff)<<16 | rgb&0xff00 | rgb>>16
+}
+func fillMailCard(dc uintptr, x, y, w, h, r int32, rgb uintptr) {
+	brush := g("CreateSolidBrush", mailRGB(rgb))
+	oldBrush := g("SelectObject", dc, brush)
+	oldPen := g("SelectObject", dc, g("GetStockObject", 8))
+	g("RoundRect", dc, uintptr(x), uintptr(y), uintptr(x+w), uintptr(y+h), uintptr(2*r), uintptr(2*r))
+	g("SelectObject", dc, oldBrush)
+	g("SelectObject", dc, oldPen)
+	g("DeleteObject", brush)
+}
+func drawMailStroke(dc, rgb, width uintptr, lines ...[4]int32) {
+	pen := g("CreatePen", 0, width, mailRGB(rgb))
+	old := g("SelectObject", dc, pen)
+	for _, l := range lines {
+		g("MoveToEx", dc, uintptr(l[0]), uintptr(l[1]), 0)
+		g("LineTo", dc, uintptr(l[2]), uintptr(l[3]))
+	}
+	g("SelectObject", dc, old)
+	g("DeleteObject", pen)
 }
 func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int32, string, uintptr), labelFont, headFont, bgBrush uintptr, measure func(uintptr, string) int32) {
 	switch hwnd {
@@ -56,15 +74,52 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 		number := strconv.Itoa(len(m.items))
 		write(dc, int32(68-4*len(number)), 10, number, 0xf6f4f2)
 	case m.panel:
+		width, height := int32(m.lastPanel.w), int32(m.lastPanel.h)
+		const base, rowBG, hotBG, button, rule = 0x101418, 0x191f25, 0x222c36, 0x2c3947, 0x26313b
+		fillMailCard(dc, 0, 0, width, height, 22, base)
 		g("SelectObject", dc, headFont)
-		write(dc, 22, 12, "消息", 0xf6f4f2)
+		write(dc, 21, 12, "消息", 0xf6f4f2)
 		g("SelectObject", dc, labelFont)
-		write(dc, int32(m.lastPanel.w-103), 17, "全部清空", 0xa9a6a5)
+		total := strconv.Itoa(len(m.items))
+		fillMailCard(dc, 69, 14, 30, 24, 8, button)
+		write(dc, 84-measure(dc, total)/2, 17, total, 0xf6f4f2)
+		clearBG := uintptr(rowBG)
+		if m.hot == 92 {
+			clearBG = hotBG
+		}
+		fillMailCard(dc, width-112, 11, 98, 31, 8, clearBG)
+		write(dc, width-63-measure(dc, "全部清空")/2, 17, "全部清空", 0xf6f4f2)
+		drawMailStroke(dc, rule, 1, [4]int32{17, 47, width - 18, 47})
+		tiles := [3]uintptr{0x15362e, 0x1b314a, 0x3b2c24}
+		accents := [3]uintptr{0x72dcb1, 0x92baff, 0xf0be85}
 		for i, item := range m.visible() {
 			y := int32(mailHeader + i*mailRow)
-			fillMailRect(dc, 15, y, int32(m.lastPanel.w-30), mailRow-4, bgBrush)
-			write(dc, 27, y+14, agentNames[item.agent], 0xf6f4f2)
-			write(dc, max(168, 27+measure(dc, agentNames[item.agent])+18), y+14, item.summary(), 0xd4d0cc)
+			color := uintptr(rowBG)
+			if m.hot == mailOpenBase+i || m.hot == mailDismissBase+i {
+				color = hotBG
+			}
+			fillMailCard(dc, 12, y, width-24, mailRow-5, 11, color)
+			tone := item.tone()
+			fillMailCard(dc, 24, y+14, 32, 32, 9, tiles[tone])
+			switch tone {
+			case 0:
+				drawMailStroke(dc, accents[tone], 2, [4]int32{34, y + 30, 39, y + 35}, [4]int32{39, y + 35, 47, y + 25})
+			case 1:
+				write(dc, 40-measure(dc, "?")/2, y+20, "?", mailRGB(accents[tone]))
+			case 2:
+				drawMailStroke(dc, accents[tone], 2, [4]int32{40, y + 23, 40, y + 32}, [4]int32{40, y + 35, 40, y + 37})
+			}
+			g("SelectObject", dc, headFont)
+			write(dc, 69, y+7, agentNames[item.agent], 0xf6f4f2)
+			g("SelectObject", dc, labelFont)
+			write(dc, 69, y+31, item.summary(), mailRGB(accents[tone]))
+			x, cy := width-40, y+29
+			closeInk := uintptr(0x74787b)
+			if m.hot == mailDismissBase+i {
+				fillMailCard(dc, width-60, y+12, 40, 34, 9, button)
+				closeInk = 0xe7eef5
+			}
+			drawMailStroke(dc, closeInk, 2, [4]int32{x - 4, cy - 4, x + 5, cy + 5}, [4]int32{x - 4, cy + 4, x + 5, cy - 5})
 		}
 	case m.paper:
 		pen := g("CreatePen", 0, 1, 0xffaa7e)
@@ -159,9 +214,20 @@ func (m *winMail) windowAction(hwnd uintptr, msg uint32, wp, lp uintptr) (int, b
 		if hwnd == m.badge && !m.open {
 			return 90, true
 		}
+		if hwnd == m.panel {
+			q := mouse(lp)
+			if next := mailTarget(int(q.X), int(q.Y), m.lastPanel.w, len(m.visible())); next != m.hot {
+				m.hot = next
+				u("InvalidateRect", m.panel, 0, 0)
+			}
+		}
 		return 0, true
 	case 0x2a3: // WM_MOUSELEAVE
 		m.leaveAt = time.Now().Add(180 * time.Millisecond)
+		if hwnd == m.panel && m.hot != 0 {
+			m.hot = 0
+			u("InvalidateRect", m.panel, 0, 0)
+		}
 		return 0, true
 	case 0x20a: // WM_MOUSEWHEEL
 		if hwnd == m.panel {
@@ -178,17 +244,18 @@ func (m *winMail) windowAction(hwnd uintptr, msg uint32, wp, lp uintptr) (int, b
 			return 90, true
 		}
 		q := mouse(lp)
-		if q.Y < mailHeader && int(q.X) > m.lastPanel.w-115 {
-			return 92, true
+		hit := mailTarget(int(q.X), int(q.Y), m.lastPanel.w, len(m.visible()))
+		if hit == 92 || hit >= mailDismissBase {
+			m.clickAt = time.Time{}
+			return hit, true
 		}
-		if q.Y >= mailHeader {
-			row := int(q.Y-mailHeader) / mailRow
+		if hit >= mailOpenBase {
 			now := time.Now()
-			if row < min(len(m.items), mailVisible) && m.lastRow == row && now.Sub(m.clickAt) <= 450*time.Millisecond {
+			if m.lastRow == hit && now.Sub(m.clickAt) <= 450*time.Millisecond {
 				m.clickAt = time.Time{}
-				return 300 + row, true
+				return hit, true
 			}
-			m.lastRow, m.clickAt = row, now
+			m.lastRow, m.clickAt = hit, now
 		}
 		return 0, true
 	}

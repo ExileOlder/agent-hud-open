@@ -12,14 +12,16 @@ import (
 // gap, fallback to the head side when out of room) and its paper silhouette
 // (flight-plan.ts). The inbox stores only a routing ID and a fixed status.
 const (
-	mailSize    = 84
-	mailGap     = 9
-	mailWidth   = 390
-	mailHeader  = 48
-	mailRow     = 52
-	mailVisible = 6
-	mailLimit   = 32
-	mailFlight  = 620 * time.Millisecond
+	mailSize        = 84
+	mailGap         = 9
+	mailWidth       = 390
+	mailHeader      = 52
+	mailRow         = 64
+	mailVisible     = 6
+	mailLimit       = 32
+	mailFlight      = 620 * time.Millisecond
+	mailOpenBase    = 300
+	mailDismissBase = 320
 )
 
 type mailRect struct{ x, y, w, h int }
@@ -29,6 +31,16 @@ type mailItem struct {
 	event      codexnotice.Event
 	permission bool
 	profile    uint32
+}
+
+func (item mailItem) tone() int {
+	if item.permission {
+		return 2
+	}
+	if item.event.Question {
+		return 1
+	}
+	return 0
 }
 
 func (item mailItem) summary() string {
@@ -195,14 +207,43 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 			m.offset = next
 			m.revision++
 		}
-	case action >= 300 && action < 300+len(m.visible()):
-		return m.visible()[action-300], true
+	case action >= mailDismissBase && action < mailDismissBase+len(m.visible()):
+		index := m.offset + action - mailDismissBase
+		copy(m.items[index:], m.items[index+1:])
+		m.items[len(m.items)-1] = mailItem{}
+		m.items = m.items[:len(m.items)-1]
+		m.offset = max(0, min(m.offset, len(m.items)-mailVisible))
+		m.revision++
+		if len(m.items) == 0 {
+			m.open = false
+		}
+	case action >= mailOpenBase && action < mailOpenBase+len(m.visible()):
+		return m.visible()[action-mailOpenBase], true
 	}
 	return mailItem{}, false
 }
 
 func (m *mailInbox) visible() []mailItem {
 	return m.items[m.offset:min(len(m.items), m.offset+mailVisible)]
+}
+
+// Hit testing matches the card geometry. The × is separate from the
+// double-click target so dismissing a row can never open its client.
+func mailTarget(x, y, width, rows int) int {
+	if x >= width-112 && x < width-14 && y >= 11 && y < 42 {
+		return 92
+	}
+	if x < 12 || x >= width-12 || y < mailHeader {
+		return 0
+	}
+	row, inside := (y-mailHeader)/mailRow, (y-mailHeader)%mailRow
+	if row >= rows || inside >= mailRow-5 {
+		return 0
+	}
+	if x >= width-60 && x < width-20 && inside >= 12 && inside < 46 {
+		return mailDismissBase + row
+	}
+	return mailOpenBase + row
 }
 
 func inboxTail(bar, screen mailRect, edge int) mailRect {
