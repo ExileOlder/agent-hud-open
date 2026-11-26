@@ -122,6 +122,7 @@ type placement struct {
 	Offset       float64
 	Numbers      bool
 	ReduceMotion bool
+	Accounts     [2]string
 }
 
 func settingsPath() string {

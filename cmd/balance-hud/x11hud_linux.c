@@ -1,6 +1,7 @@
 #include "x11hud.h"
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/keysym.h>
 #include <X11/Xft/Xft.h>
 #include <X11/extensions/shape.h>
 #include <math.h>
@@ -16,15 +17,20 @@ enum { slots = 4, item = 92, wide = 148, pad = 4, peek_height = 64, peek_pad = 3
 typedef struct { char label[96], value[192]; int tone; } PeekCell;
 struct Hud {
     Display *d;
-    Window root, bar, tip;
+    Window root, bar, tip, prefs;
+    Atom wm_delete;
     GC gc;
-    XftFont *font, *heading;
-    XftDraw *tip_draw;
+    XftFont *font, *heading, *prefs_font;
+    XftDraw *tip_draw, *prefs_draw;
     XftColor text_color, muted_text, tones[4];
     Pixmap bitmap;
     int bw, bh;
-    int tip_x, tip_y, tip_w, tip_h, settings, motion;
-    long long leave_at, down_at;
+    int tip_x, tip_y, tip_w, tip_h, motion;
+    int prefs_visible, page, prefs_count;
+    PeekCell prefs_rows[8];
+    char prefs_help[192];
+    unsigned long card_bg, side_bg, selected_bg;
+    long long leave_at, down_at, peek_started;
     unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
     int edge, numbers, hover, pressed, moved, outlined, down_x, down_y, grab_x, grab_y;
@@ -71,7 +77,7 @@ static void paint_gear(Hud *h,int x,int y) {
     XSetForeground(h->d,h->gc,h->bg);
     XFillArc(h->d,h->tip,h->gc,x-4,y-4,8,8,0,360*64);
 }
-static void shape(Hud *h,Window w,int width,int height,int r){
+static void shape(Hud *h,Window w,int width,int height,int r,const XRectangle *clip){
     if(!XShapeQueryExtension(h->d,&(int){0},&(int){0}))return;
     XRectangle rects[512];
     int n=0;
@@ -86,6 +92,17 @@ static void shape(Hud *h,Window w,int width,int height,int r){
         XRectangle row=rects[y];
         row.y=height-1-y;
         rects[n++]=row;
+    }
+    if(clip){
+        int written=0;
+        for(int i=0;i<n;i++){
+            XRectangle q=rects[i];
+            int x1=q.x>clip->x?q.x:clip->x,y1=q.y>clip->y?q.y:clip->y;
+            int x2=q.x+q.width<clip->x+clip->width?q.x+q.width:clip->x+clip->width;
+            int y2=q.y+q.height<clip->y+clip->height?q.y+q.height:clip->y+clip->height;
+            if(x2>x1&&y2>y1)rects[written++]=(XRectangle){x1,y1,x2-x1,y2-y1};
+        }
+        n=written;
     }
     XShapeCombineRectangles(h->d,w,ShapeBounding,0,0,rects,n,ShapeSet,YXBanded);
 }
@@ -141,17 +158,29 @@ static void place(Hud *h) {
     h->y = h->sy + (v ? (int)((h->sh - h->height) * h->offset)
                           : (h->edge == 2 ? h->sh - h->height - 3 : 3));
     XMoveResizeWindow(h->d, h->bar, h->x, h->y, h->w, h->height);
-    shape(h,h->bar,h->w,h->height,50);
+    shape(h,h->bar,h->w,h->height,50,NULL);
     draw(h);
 }
 static void hide_tip(Hud *h) {
-    h->hover=-1;h->leave_at=0;h->settings=0;
+    h->hover=-1;h->leave_at=0;h->peek_started=0;
     XUnmapWindow(h->d,h->tip);
 }
 static int text_width(Hud *h, XftFont *font, const char *s) {
     XGlyphInfo ext;
     XftTextExtentsUtf8(h->d,font,(const FcChar8*)s,strlen(s),&ext);
     return ext.xOff;
+}
+// Reveal the rounded pill from the edge it touches, easing toward the
+// full shape. No resize/move of the actual hit target or periodic repaint.
+static void peek_shape(Hud *h) {
+    int w=h->tip_w,v=h->tip_h;
+    double t=h->peek_started&&h->motion?(millis()-h->peek_started)/180.0:1;
+    if(t>=1){h->peek_started=0;shape(h,h->tip,w,v,peek_height/2,NULL);return;}
+    double remain=.72*(1-t)*(1-t)*(1-t);
+    int dx=lround(w*remain),dy=lround(v*remain);
+    XRectangle clip={h->edge==1?dx:0,h->edge==2?dy:0,
+        vertical(h)?w-dx:w,vertical(h)?v:v-dy};
+    shape(h,h->tip,w,v,peek_height/2,&clip);
 }
 static void draw_tip(Hud *h) {
     if(h->hover<0)return;
@@ -162,8 +191,8 @@ static void draw_tip(Hud *h) {
         natural+=text_width(h,h->font,cells[i].label)+peek_gap+
             text_width(h,h->heading,cells[i].value)+(i?peek_spacing:0);
     int available=vertical(h)?h->sw-h->w-3:h->sw;
-    int width=clamp(h->settings?320:natural,1,available);
-    int height=h->settings?342:peek_height;
+    int width=clamp(natural,gear+1,available);
+    int height=peek_height;
     int x=h->x+h->hover*step(h)+(step(h)-width)/2,y=h->y+h->height;
     if(h->edge==1){x=h->x-width;y=h->y+pad+h->hover*item+(item-height)/2;}
     if(h->edge==2)y=h->y-height;
@@ -172,21 +201,9 @@ static void draw_tip(Hud *h) {
     y=clamp(y,h->sy,h->sy+h->sh-height);
     h->tip_x=x;h->tip_y=y;h->tip_w=width;h->tip_h=height;
     XMoveResizeWindow(h->d,h->tip,x,y,width,height);
-    shape(h,h->tip,width,height,h->settings?16:peek_height/2);
+    peek_shape(h);
     XMapRaised(h->d,h->tip);
     XClearArea(h->d,h->tip,0,0,0,0,False);
-    if(h->settings){
-        label(h,20,33,"Balance HUD settings",h->heading,&h->text_color);
-        label(h,20,57,"Local appearance controls",h->font,&h->muted_text);
-        const char *options[]={h->numbers?"Hide percentages":"Show percentages",
-          h->motion?"Turn off animation":"Turn on animation",
-          "Move to top edge","Move to right edge","Move to bottom edge","Move to left edge","Refresh balances","Close settings"};
-        for(int i=0;i<8;i++){
-            int yy=72+i*32;
-            box(h,14,yy,width-28,28,h->track);
-            label(h,24,yy+19,options[i],h->font,&h->text_color);
-        }
-    }else{
         int tx=peek_pad;
         int baseline=(height+h->font->ascent-h->font->descent)/2;
         XRectangle clip={0,0,(unsigned short)(width-gear),height};
@@ -200,14 +217,13 @@ static void draw_tip(Hud *h) {
         }
         XftDrawSetClip(h->tip_draw,NULL);
         paint_gear(h,width-gear/2-3,height/2);
-    }
 }
 static void pick(Hud *h, int x, int y) {
     int i=((vertical(h)?y:x)-pad)/step(h);
     if(i<0||i>=slots){hide_tip(h);return;}
     h->leave_at=0;
-    if(h->settings)return;
-    if(i!=h->hover){h->hover=i;draw_tip(h);}
+
+    if(i!=h->hover){h->hover=i;h->peek_started=h->motion?millis():0;draw_tip(h);}
 }
 static void drag(Hud *h,int x,int y) {
     h->moved=1;h->outlined=1;
@@ -226,6 +242,62 @@ static void drop(Hud *h, int x, int y) {
     int offset=(vertical(h)?center_y:center_x)-run/2;
     h->offset=travel>0?(double)clamp(offset,0,travel)/travel:.5;
     place(h);
+}
+
+enum { prefs_w=760, prefs_h=452, sidebar_w=176, prefs_top=107, prefs_row=49 };
+static void prefs_box(Hud *h,int x,int y,int w,int height,unsigned long fill) {
+    XSetForeground(h->d,h->gc,fill);
+    XFillRectangle(h->d,h->prefs,h->gc,x,y,w,height);
+}
+static void prefs_text(Hud *h,int x,int y,const char *s,XftFont *font,XftColor *ink) {
+    XftDrawStringUtf8(h->prefs_draw,ink,font,x,y,(const FcChar8*)s,strlen(s));
+}
+static void draw_prefs(Hud *h) {
+    if(!h->prefs_visible)return;
+    prefs_box(h,0,0,prefs_w,prefs_h,h->card_bg);
+    prefs_box(h,0,0,sidebar_w,prefs_h,h->side_bg);
+    prefs_text(h,20,37,"Balance HUD",h->heading,&h->text_color);
+    for(int i=0;i<2;i++){
+        if(i==h->page)prefs_box(h,12,68+i*44,sidebar_w-24,38,h->selected_bg);
+        prefs_text(h,23,93+i*44,i?"Accounts":"Display",h->prefs_font,&h->text_color);
+    }
+    int left=sidebar_w+28;
+    prefs_text(h,left,47,h->page?"Quota accounts":"Display",h->heading,&h->text_color);
+    prefs_text(h,left,77,h->page?"Choose which subscriptions the float follows.":"Choose how the float sits on your desktop.",h->prefs_font,&h->muted_text);
+    for(int i=0;i<h->prefs_count;i++){
+        int y=prefs_top+i*prefs_row;
+        prefs_box(h,left,y,prefs_w-left-28,prefs_row-4,h->side_bg);
+        PeekCell *row=&h->prefs_rows[i];
+        prefs_text(h,left+12,y+28,row->label,h->prefs_font,&h->text_color);
+        int length=text_width(h,h->prefs_font,row->value);
+        int right=prefs_w-42;
+        XRectangle clip={left+294,y,right-(left+294),prefs_row-4};
+        XftDrawSetClipRectangles(h->prefs_draw,0,0,&clip,1);
+        prefs_text(h,right-length,y+28,row->value,h->prefs_font,&h->tones[1]);
+        XftDrawSetClip(h->prefs_draw,NULL);
+    }
+    prefs_text(h,left,prefs_h-35,h->prefs_help,h->prefs_font,&h->muted_text);
+}
+void hud_settings_row(Hud *h,int i,const char *label,const char *value) {
+    if(i<0||i>=8)return;
+    snprintf(h->prefs_rows[i].label,sizeof(h->prefs_rows[i].label),"%s",label);
+    snprintf(h->prefs_rows[i].value,sizeof(h->prefs_rows[i].value),"%s",value);
+}
+void hud_settings_sync(Hud *h,int page,int n,const char *help) {
+    h->page=page;h->prefs_count=clamp(n,0,8);
+    snprintf(h->prefs_help,sizeof(h->prefs_help),"%s",help);
+    draw_prefs(h); XFlush(h->d);
+}
+void hud_settings_show(Hud *h) {
+    hide_tip(h);
+    if(!h->prefs_visible)XMoveWindow(h->d,h->prefs,h->sx+(h->sw-prefs_w)/2,h->sy+(h->sh-prefs_h)/2);
+    h->prefs_visible=1;
+    XMapRaised(h->d,h->prefs);
+    draw_prefs(h); XFlush(h->d);
+}
+void hud_appearance(Hud *h,int edge,double offset,int numbers,int motion) {
+    h->edge=edge;h->offset=offset;h->numbers=numbers;h->motion=motion;
+    hide_tip(h);place(h);XFlush(h->d);
 }
 
 Hud *hud_open(int edge, double offset, int numbers,int motion) {
@@ -270,9 +342,20 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     Visual *visual=DefaultVisual(d,screen);
     Colormap cmap=DefaultColormap(d,screen);
     h->font=XftFontOpenName(d,screen,"sans:pixelsize=21");
+    h->prefs_font=XftFontOpenName(d,screen,"sans:pixelsize=16");
     h->heading=XftFontOpenName(d,screen,"sans:bold:pixelsize=21");
     h->tip_draw=XftDrawCreate(d,h->tip,visual,cmap);
-    if(!h->font||!h->heading||!h->tip_draw){hud_close(h);return NULL;}
+    h->card_bg=color(h,"#242629",h->bg);h->side_bg=color(h,"#1a1c1f",h->bg);
+    h->selected_bg=color(h,"#225da3",h->bg);
+    h->prefs=XCreateSimpleWindow(d,h->root,0,0,prefs_w,prefs_h,0,h->bg,h->card_bg);
+    XStoreName(d,h->prefs,"Balance HUD Settings");
+    XSizeHints hints={.flags=PMinSize|PMaxSize,.min_width=prefs_w,.min_height=prefs_h,.max_width=prefs_w,.max_height=prefs_h};
+    XSetWMNormalHints(d,h->prefs,&hints);
+    h->wm_delete=XInternAtom(d,"WM_DELETE_WINDOW",False);
+    XSetWMProtocols(d,h->prefs,&h->wm_delete,1);
+    XSelectInput(d,h->prefs,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);
+    h->prefs_draw=XftDrawCreate(d,h->prefs,visual,cmap);
+    if(!h->font||!h->heading||!h->prefs_font||!h->tip_draw||!h->prefs_draw){hud_close(h);return NULL;}
     XftColorAllocName(d,visual,cmap,"#f2f4f6",&h->text_color);
     XftColorAllocName(d,visual,cmap,"#878787",&h->muted_text);
     const char *ink[]={"#f2f4f6","#2dd980","#ffc55e","#ff6878"};
@@ -285,7 +368,9 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
 void hud_close(Hud *h) {
     if(h->bitmap)XFreePixmap(h->d,h->bitmap);
     if(h->tip_draw)XftDrawDestroy(h->tip_draw);
+    if(h->prefs_draw)XftDrawDestroy(h->prefs_draw);
     if(h->font)XftFontClose(h->d,h->font);
+    if(h->prefs_font)XftFontClose(h->d,h->prefs_font);
     if(h->heading)XftFontClose(h->d,h->heading);
     XFreeGC(h->d,h->gc);
     XCloseDisplay(h->d);
@@ -303,6 +388,7 @@ void hud_peek(Hud *h,int slot,int n) {
     if(h->hover==slot)draw_tip(h);
 }
 int hud_step(Hud *h,int timeout) {
+    if(h->peek_started&&timeout>16)timeout=16;
     if(!XPending(h->d)){
         struct pollfd fd={.fd=ConnectionNumber(h->d),.events=POLLIN};
         poll(&fd,1,timeout);
@@ -310,13 +396,27 @@ int hud_step(Hud *h,int timeout) {
     while(XPending(h->d)){
         XEvent e;
         XNextEvent(h->d,&e);
+        if(e.xany.window==h->prefs){
+            if(e.type==Expose&&e.xexpose.count==0)draw_prefs(h);
+            if((e.type==ClientMessage&&(Atom)e.xclient.data.l[0]==h->wm_delete)||
+               (e.type==KeyPress&&XLookupKeysym(&e.xkey,0)==XK_Escape)){
+                h->prefs_visible=0;XUnmapWindow(h->d,h->prefs);
+            }
+            if(e.type==ButtonPress&&e.xbutton.button==Button1){
+                int x=e.xbutton.x,y=e.xbutton.y;
+                if(x<sidebar_w&&y>=68&&y<156)return 10+(y-68)/44;
+                if(x>=sidebar_w+28&&y>=prefs_top&&y<prefs_top+h->prefs_count*prefs_row)
+                    return 20+(y-prefs_top)/prefs_row;
+            }
+            continue;
+        }
         switch(e.type){
         case Expose:
             // Expose can be queued by mapping the tooltip. Clear/draw without remapping.
             if(e.xexpose.count==0 && e.xexpose.window==h->bar)draw(h);
             if(e.xexpose.count==0 && e.xexpose.window==h->tip)draw_tip(h);
             break;
-        case LeaveNotify:if(!h->settings)h->leave_at=millis()+180;break;
+        case LeaveNotify:h->leave_at=millis()+180;break;
         case EnterNotify:h->leave_at=0;break;
         case MotionNotify:
             if(h->pressed){
@@ -328,20 +428,7 @@ int hud_step(Hud *h,int timeout) {
             if(e.xbutton.window==h->tip){
                 if(e.xbutton.button==Button3){hide_tip(h);break;}
                 if(e.xbutton.button!=Button1)break;
-                int y=e.xbutton.y;
-                if(!h->settings && e.xbutton.x>=h->tip_w-gear){
-                    h->settings=1;draw_tip(h);break;
-                }
-                if(h->settings && y>=72 && y<72+8*32){
-                    int option=(y-72)/32;
-                    if(option==0)h->numbers=!h->numbers;
-                    else if(option==1)h->motion=!h->motion;
-                    else if(option==6)return 3;
-                    else if(option==7){hide_tip(h);break;}
-                    else {h->edge=option-2;place(h);hide_tip(h);}
-                    if(option<2){place(h);draw_tip(h);}
-                    XFlush(h->d);return 2;
-                }
+                if(e.xbutton.x>=h->tip_w-gear)return 4;
                 break;
             }
             if(e.xbutton.button==Button1){
@@ -366,6 +453,7 @@ int hud_step(Hud *h,int timeout) {
             break;
         }
     }
+    if(h->peek_started)peek_shape(h);
     if(h->pressed&&!h->outlined&&millis()-h->down_at>=300){
         h->outlined=1;draw(h);
     }
@@ -378,4 +466,3 @@ double hud_offset(Hud *h){return h->offset;}
 int hud_numbers(Hud *h){return h->numbers;}
 
 int hud_hover(Hud *h){return h->hover;}
-int hud_motion(Hud *h){return h->motion;}

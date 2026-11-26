@@ -94,12 +94,18 @@ func paintGear(dc uintptr, x, y int32, background uintptr) {
 	g("SelectObject", dc, pen)
 }
 
-func runDesktop(fetch func() []result) error {
+func runDesktop(fetch func() []result, clients ...settingsTools) error {
+	var tools settingsTools
+	if len(clients) != 0 {
+		tools = clients[0]
+	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	p := loadPlacement()
 	rows := view(nil)
-	var bar, tip, notice uintptr
+	var bar, tip, notice, prefs uintptr
+	var panel panelSettings
+	const prefsW, prefsH, sidebarW, prefsTop, prefsRow = 760, 452, 176, 107, 49
 	var messages []int
 	var noticeID int
 	var noticeUntil time.Time
@@ -119,14 +125,13 @@ func runDesktop(fetch func() []result) error {
 		busy = true
 		go func() { ready <- fetch() }()
 	}
-	var settings bool
 	var hideAt time.Time
 	hide := func() {
 		hover = -1
-		settings = false
 		hideAt = time.Time{}
 		if tip != 0 {
 			u("ShowWindow", tip, 0)
+			u("KillTimer", tip, 2)
 		}
 	}
 	dimensions := func() (int32, int32, int32) { w, h, step := barGeometry(p); return int32(w), int32(h), int32(step) }
@@ -144,13 +149,15 @@ func runDesktop(fetch func() []result) error {
 		g("GetTextExtentPoint32W", dc, uintptr(unsafe.Pointer(&t[0])), uintptr(len(t)-1), uintptr(unsafe.Pointer(&size)))
 		return size.X
 	}
-	font := func(weight uintptr) uintptr {
+	font := func(weight uintptr, size uintptr) uintptr {
 		name := utf16("Segoe UI")
-		return g("CreateFontW", ^uintptr(20), 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, uintptr(unsafe.Pointer(name)))
+		return g("CreateFontW", ^size, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, uintptr(unsafe.Pointer(name)))
 	}
-	labelFont, valueFont := font(400), font(600)
+	labelFont, valueFont := font(400, 20), font(600, 20)
 	defer g("DeleteObject", labelFont)
 	defer g("DeleteObject", valueFont)
+	prefsFont := font(400, 15)
+	defer g("DeleteObject", prefsFont)
 	started := time.Now()
 	hoverStart := started
 	var motionAnimating bool
@@ -179,6 +186,36 @@ func runDesktop(fetch func() []result) error {
 		u("SetWindowPos", bar, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(bar)
 	}
+	var tipWidth, tipHeight int32
+	peekShape := func(now time.Time) bool {
+		w, h := tipWidth, tipHeight
+		elapsed := float64(now.Sub(hoverStart)) / float64(180*time.Millisecond)
+		if p.ReduceMotion || elapsed >= 1 {
+			shape(tip, w, h, peekHeight)
+			return false
+		}
+		remain := .72 * math.Pow(1-max(0, elapsed), 3)
+		dx, dy := int32(math.Round(float64(w)*remain)), int32(math.Round(float64(h)*remain))
+		left, top, right, bottom := int32(0), int32(0), w, h
+		switch p.Edge {
+		case 0:
+			bottom = h - dy
+		case 1:
+			left = dx
+		case 2:
+			top = dy
+		case 3:
+			right = w - dx
+		}
+		region := g("CreateRoundRectRgn", 0, 0, uintptr(w+1), uintptr(h+1), peekHeight, peekHeight)
+		clip := g("CreateRectRgn", uintptr(left), uintptr(top), uintptr(right), uintptr(bottom))
+		g("CombineRgn", region, region, clip, 1)
+		g("DeleteObject", clip)
+		if u("SetWindowRgn", tip, region, 1) == 0 {
+			g("DeleteObject", region)
+		}
+		return true
+	}
 	details := func(i int) {
 		if i >= len(rows) || i < 0 {
 			hide()
@@ -194,24 +231,20 @@ func runDesktop(fetch func() []result) error {
 		}
 		hover = i
 		w, h := int32(2*peekPad+gear), int32(peekHeight)
-		if settings {
-			w, h = 320, 342
-		} else {
-			dc := u("GetDC", tip)
-			if dc != 0 {
-				old := g("SelectObject", dc, labelFont)
-				for j, cell := range rows[i].peekLine(i) {
-					g("SelectObject", dc, labelFont)
-					w += measure(dc, cell.Label) + peekGap
-					g("SelectObject", dc, valueFont)
-					w += measure(dc, cell.Value)
-					if j != 0 {
-						w += peekSpacing
-					}
+		dc := u("GetDC", tip)
+		if dc != 0 {
+			old := g("SelectObject", dc, labelFont)
+			for j, cell := range rows[i].peekLine(i) {
+				g("SelectObject", dc, labelFont)
+				w += measure(dc, cell.Label) + peekGap
+				g("SelectObject", dc, valueFont)
+				w += measure(dc, cell.Value)
+				if j != 0 {
+					w += peekSpacing
 				}
-				g("SelectObject", dc, old)
-				u("ReleaseDC", tip, dc)
 			}
+			g("SelectObject", dc, old)
+			u("ReleaseDC", tip, dc)
 		}
 		available := area.Right - area.Left
 		if p.Edge%2 != 0 {
@@ -231,31 +264,24 @@ func runDesktop(fetch func() []result) error {
 		}
 		x = bound(x, area.Left, area.Right-w)
 		y = bound(y, area.Top, area.Bottom-h)
-		if settings {
-			shape(tip, w, h, 32)
-		} else {
-			shape(tip, w, h, peekHeight)
+		tipWidth, tipHeight = w, h
+		if peekShape(time.Now()) {
+			u("SetTimer", tip, 2, 16, 0)
 		}
 		u("SetWindowPos", tip, ^uintptr(0), uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0x10|0x40)
 		invalidate(tip)
 	}
 	bg := g("CreateSolidBrush", 0x090705)
-	button := g("CreateSolidBrush", 0x32281d)
-	if bg == 0 || button == 0 {
+	if bg == 0 {
 		return fmt.Errorf("cannot create HUD panel brushes")
 	}
 	defer g("DeleteObject", bg)
-	defer g("DeleteObject", button)
-	options := func() []string {
-		nums, motion := "Show percentages", "Turn off animation"
-		if p.Numbers {
-			nums = "Hide percentages"
-		}
-		if p.ReduceMotion {
-			motion = "Turn on animation"
-		}
-		return []string{nums, motion, "Move to top edge", "Move to right edge", "Move to bottom edge", "Move to left edge", "Refresh balances", "Close settings"}
-	}
+	prefsBG := g("CreateSolidBrush", 0x292624)
+	sideBG := g("CreateSolidBrush", 0x1f1c1a)
+	selectedBG := g("CreateSolidBrush", 0xa35d22)
+	defer g("DeleteObject", prefsBG)
+	defer g("DeleteObject", sideBG)
+	defer g("DeleteObject", selectedBG)
 	write := func(dc uintptr, x, y int32, s string, color uintptr) {
 		s = strings.ReplaceAll(s, "\x00", "")
 		t := utf16(s)
@@ -285,37 +311,59 @@ func runDesktop(fetch func() []result) error {
 			}
 			return
 		}
+		if hwnd == prefs {
+			fill := func(x, y, w, h int32, b uintptr) {
+				rc := rect{x, y, x + w, y + h}
+				u("FillRect", dc, uintptr(unsafe.Pointer(&rc)), b)
+			}
+			fill(0, 0, prefsW, prefsH, prefsBG)
+			fill(0, 0, sidebarW, prefsH, sideBG)
+			g("SelectObject", dc, valueFont)
+			write(dc, 20, 20, "Balance HUD", 0xf6f4f2)
+			title, desc := "Display", "Choose how the float sits on your desktop."
+			if panel.page == 1 {
+				title, desc = "Quota accounts", "Choose which subscriptions the float follows."
+			}
+			write(dc, sidebarW+28, 25, title, 0xf6f4f2)
+			g("SelectObject", dc, prefsFont)
+			write(dc, sidebarW+28, 60, desc, 0xa9a6a5)
+			for i, label := range []string{"Display", "Accounts"} {
+				y := int32(68 + i*44)
+				if i == panel.page {
+					fill(12, y, sidebarW-24, 38, selectedBG)
+				}
+				write(dc, 23, y+8, label, 0xf6f4f2)
+			}
+			for i, item := range panel.items(p, rows) {
+				y := int32(prefsTop + i*prefsRow)
+				fill(sidebarW+28, y, prefsW-sidebarW-56, prefsRow-4, sideBG)
+				write(dc, sidebarW+40, y+13, item.title, 0xf6f4f2)
+				g("IntersectClipRect", dc, sidebarW+322, uintptr(y), prefsW-42, uintptr(y+prefsRow-4))
+				write(dc, prefsW-42-measure(dc, item.value), y+13, item.value, 0x80d92d)
+				g("SelectClipRgn", dc, 0)
+			}
+			write(dc, sidebarW+28, prefsH-51, panel.help(), 0xa9a6a5)
+			return
+		}
 		if hwnd == tip {
 			if hover < 0 {
 				return
 			}
-			barButton := func(y int32, s string) {
-				box := rect{13, y, r.Right - 13, y + 30}
-				u("FillRect", dc, uintptr(unsafe.Pointer(&box)), button)
-				write(dc, 24, y+6, s, 0xffc990)
+
+			x := int32(peekPad)
+			y := (r.Bottom - 25) / 2
+			tones := [...]uintptr{0xf6f4f2, 0x80d92d, 0x5ec5ff, 0x7868ff}
+			g("IntersectClipRect", dc, 0, 0, uintptr(r.Right-gear), uintptr(r.Bottom))
+			for _, cell := range rows[hover].peekLine(hover) {
+				g("SelectObject", dc, labelFont)
+				write(dc, x, y, cell.Label, 0x878787)
+				x += measure(dc, cell.Label) + peekGap
+				g("SelectObject", dc, valueFont)
+				write(dc, x, y, cell.Value, tones[cell.Tone])
+				x += measure(dc, cell.Value) + peekSpacing
 			}
-			if settings {
-				write(dc, 20, 15, "Balance HUD settings", 0xf5eee7)
-				write(dc, 20, 41, "Local appearance controls", 0xc8bbae)
-				for i, label := range options() {
-					barButton(72+int32(i)*32, label)
-				}
-			} else {
-				x := int32(peekPad)
-				y := (r.Bottom - 25) / 2
-				tones := [...]uintptr{0xf6f4f2, 0x80d92d, 0x5ec5ff, 0x7868ff}
-				g("IntersectClipRect", dc, 0, 0, uintptr(r.Right-gear), uintptr(r.Bottom))
-				for _, cell := range rows[hover].peekLine(hover) {
-					g("SelectObject", dc, labelFont)
-					write(dc, x, y, cell.Label, 0x878787)
-					x += measure(dc, cell.Label) + peekGap
-					g("SelectObject", dc, valueFont)
-					write(dc, x, y, cell.Value, tones[cell.Tone])
-					x += measure(dc, cell.Value) + peekSpacing
-				}
-				g("SelectClipRgn", dc, 0)
-				paintGear(dc, r.Right-gear/2-3, r.Bottom/2, bg)
-			}
+			g("SelectClipRgn", dc, 0)
+			paintGear(dc, r.Right-gear/2-3, r.Bottom/2, bg)
 			return
 		}
 		now := time.Now()
@@ -358,7 +406,7 @@ func runDesktop(fetch func() []result) error {
 			return
 		}
 		i := int((v - 4) / step)
-		if i != hover && !settings {
+		if i != hover {
 			details(i)
 		}
 	}
@@ -413,55 +461,68 @@ func runDesktop(fetch func() []result) error {
 		invalidate(notice)
 	}
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
+		if hwnd == prefs && prefs != 0 {
+			switch msg {
+			case 0x10:
+				u("ShowWindow", prefs, 0)
+				return 0
+			case 0x100:
+				if wp == 27 {
+					u("ShowWindow", prefs, 0)
+					return 0
+				}
+			case 0x202:
+				m := mouse(lp)
+				if m.X < sidebarW && m.Y >= 68 && m.Y < 156 {
+					panel.page, panel.message = int((m.Y-68)/44), ""
+				} else if m.X >= sidebarW+28 && m.Y >= prefsTop && m.Y < prefsTop+int32(len(panel.items(p, rows)))*prefsRow {
+					changed, reload := panel.apply(&p, int((m.Y-prefsTop)/prefsRow), rows, tools)
+					if changed {
+						save()
+						if panel.page == 0 {
+							hide()
+							place()
+						} else {
+							rows = updateView(rows, settingsResults(panel.raw, p))
+							invalidate(bar)
+						}
+					}
+					if reload {
+						refresh()
+					}
+				}
+				invalidate(prefs)
+				return 0
+			}
+		}
 		if hwnd == tip && tip != 0 {
 			switch msg {
+			case 0x113:
+				if wp == 2 {
+					if hover < 0 || !peekShape(time.Now()) {
+						u("KillTimer", tip, 2)
+					}
+					return 0
+				}
 			case 0x200:
 				hideAt = time.Time{}
 				event := track{Flags: 2, Window: tip}
 				event.Size = uint32(unsafe.Sizeof(event))
 				u("TrackMouseEvent", uintptr(unsafe.Pointer(&event)))
 			case 0x2a3:
-				if !settings {
-					hideAt = time.Now().Add(180 * time.Millisecond)
-				}
+				hideAt = time.Now().Add(180 * time.Millisecond)
 			case 0x205:
 				hide()
 				invalidate(bar)
 				return 0
 			case 0x202:
-				m := mouse(lp)
-				y := m.Y
 				var bounds rect
 				u("GetClientRect", tip, uintptr(unsafe.Pointer(&bounds)))
-				if !settings && m.X >= bounds.Right-gear {
-					settings = true
-					details(hover)
-					return 0
-				}
-				if settings && y >= 72 && y < 72+8*32 {
-					selection := (y - 72) / 32
-					switch selection {
-					case 0:
-						p.Numbers = !p.Numbers
-						place()
-						details(hover)
-					case 1:
-						p.ReduceMotion = !p.ReduceMotion
-						invalidate(bar)
-						details(hover)
-					case 6:
-						refresh()
-						return 0
-					case 7:
-						hide()
-						invalidate(bar)
-						return 0
-					default:
-						p.Edge = int(selection - 2)
-						hide()
-						place()
-					}
-					save()
+				if mouse(lp).X >= bounds.Right-gear {
+					hide()
+					u("ShowWindow", prefs, 5)
+					u("SetForegroundWindow", prefs)
+					invalidate(prefs)
 					return 0
 				}
 			}
@@ -526,8 +587,13 @@ func runDesktop(fetch func() []result) error {
 				select {
 				case incoming := <-ready:
 					busy = false
-					rows = updateView(rows, incoming)
+					panel.raw = incoming
+					rows = updateView(rows, settingsResults(incoming, p))
+					if panel.message == "Refreshing balances…" {
+						panel.message = "Balances refreshed."
+					}
 					invalidate(bar)
+					invalidate(prefs)
 					if hover >= 0 {
 						details(hover)
 					}
@@ -554,9 +620,7 @@ func runDesktop(fetch func() []result) error {
 				}
 				return 0
 			case 0x2a3:
-				if !settings {
-					hideAt = time.Now().Add(180 * time.Millisecond)
-				}
+				hideAt = time.Now().Add(180 * time.Millisecond)
 				return 0
 			case 0x201:
 				hide()
@@ -622,6 +686,17 @@ func runDesktop(fetch func() []result) error {
 	}
 	defer u("DestroyWindow", notice)
 	place()
+	const settingsStyle = 0x00ca0000 // normal bordered, titled window with close/minimize
+	size := rect{Right: prefsW, Bottom: prefsH}
+	u("AdjustWindowRectEx", uintptr(unsafe.Pointer(&size)), settingsStyle, 0, 0)
+	pw, ph := size.Right-size.Left, size.Bottom-size.Top
+	px, py := area.Left+(area.Right-area.Left-pw)/2, area.Top+(area.Bottom-area.Top-ph)/2
+	prefs = u("CreateWindowExW", 0, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(utf16("Balance HUD Settings"))),
+		settingsStyle, uintptr(px), uintptr(py), uintptr(pw), uintptr(ph), 0, 0, instance, 0)
+	if prefs == 0 {
+		return fmt.Errorf("cannot create Win32 settings window")
+	}
+	defer u("DestroyWindow", prefs)
 	if u("SetTimer", bar, 1, 200, 0) == 0 {
 		return fmt.Errorf("cannot start Win32 quota timer")
 	}

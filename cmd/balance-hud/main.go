@@ -57,7 +57,7 @@ func main() {
 	}
 	fetch := func() []result { return fetchQuotas(*codex, *agy) }
 	if *desktop {
-		if err := runDesktop(fetch); err != nil {
+		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy}); err != nil {
 			println(err.Error())
 			os.Exit(1)
 		}

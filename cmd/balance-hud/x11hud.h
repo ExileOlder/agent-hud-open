@@ -10,4 +10,8 @@ int hud_numbers(Hud *h);
 
 void hud_bitmap(Hud *,int,int,const unsigned char *);
 int hud_hover(Hud *);
-int hud_motion(Hud *);
+
+void hud_settings_row(Hud *,int,const char *,const char *);
+void hud_settings_sync(Hud *,int,int,const char *);
+void hud_settings_show(Hud *);
+void hud_appearance(Hud *,int,double,int,int);

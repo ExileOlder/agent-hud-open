@@ -20,7 +20,11 @@ import (
 	"unsafe"
 )
 
-func runDesktop(fetch func() []result) error {
+func runDesktop(fetch func() []result, clients ...settingsTools) error {
+	var tools settingsTools
+	if len(clients) != 0 {
+		tools = clients[0]
+	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	p := loadPlacement()
@@ -50,6 +54,19 @@ func runDesktop(fetch func() []result) error {
 		}
 	}
 	rows := view(nil)
+	var panel panelSettings
+	drawSettings := func() {
+		items := panel.items(p, rows)
+		for i, item := range items {
+			label, value := C.CString(item.title), C.CString(item.value)
+			C.hud_settings_row(h, C.int(i), label, value)
+			C.free(unsafe.Pointer(label))
+			C.free(unsafe.Pointer(value))
+		}
+		help := C.CString(panel.help())
+		C.hud_settings_sync(h, C.int(panel.page), C.int(len(items)), help)
+		C.free(unsafe.Pointer(help))
+	}
 	set(rows)
 	var frame *image.RGBA
 	started := time.Now()
@@ -77,23 +94,62 @@ func runDesktop(fetch func() []result) error {
 		if animating {
 			timeout = 32
 		}
-		switch C.hud_step(h, C.int(timeout)) {
-		case 1:
+		action := int(C.hud_step(h, C.int(timeout)))
+		switch {
+		case action == 1:
 			return nil
-		case 2:
-			p = placement{Edge: int(C.hud_edge(h)), Offset: float64(C.hud_offset(h)), Numbers: C.hud_numbers(h) != 0, ReduceMotion: C.hud_motion(h) == 0}
+		case action == 2:
+			p.Edge, p.Offset = int(C.hud_edge(h)), float64(C.hud_offset(h))
+			p.Numbers = C.hud_numbers(h) != 0
 			dirty = true
 			if e := p.save(); e != nil {
-				fmt.Fprintln(os.Stderr, "Cannot save appearance:", e)
+				fmt.Fprintln(os.Stderr, "Cannot save preferences:", e)
 			}
-		case 3:
+			drawSettings()
+		case action == 3:
 			refresh()
+		case action == 4:
+			drawSettings()
+			C.hud_settings_show(h)
+		case action >= 10 && action <= 11:
+			panel.page, panel.message = action-10, ""
+			drawSettings()
+		case action >= 20:
+			changed, reload := panel.apply(&p, action-20, rows, tools)
+			if changed {
+				if e := p.save(); e != nil {
+					panel.message = "Could not save preferences: " + e.Error()
+				}
+				if panel.page == 0 {
+					numbers, motion := C.int(0), C.int(1)
+					if p.Numbers {
+						numbers = 1
+					}
+					if p.ReduceMotion {
+						motion = 0
+					}
+					C.hud_appearance(h, C.int(p.Edge), C.double(p.Offset), numbers, motion)
+				} else {
+					rows = updateView(rows, settingsResults(panel.raw, p))
+					set(rows)
+				}
+				dirty = true
+			}
+			if reload {
+				refresh()
+			}
+			drawSettings()
 		}
 		select {
 		case incoming := <-ready:
 			inFlight = false
-			rows = updateView(rows, incoming)
+			panel.raw = incoming
+			rows = updateView(rows, settingsResults(incoming, p))
 			set(rows)
+			if panel.message == "Refreshing balances…" {
+				panel.message = "Balances refreshed."
+			}
+			drawSettings()
 			dirty = true
 		case <-timer.C:
 			refresh()
