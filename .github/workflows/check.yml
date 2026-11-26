@@ -17,7 +17,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxext-dev libxft-dev libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxext-dev libxft-dev libsqlite3-dev xvfb x11-utils libxtst6
       - run: go test ./...
         env:
           BALANCE_HUD_GUI_SMOKE: ${{ runner.os == 'Windows' && '1' || '0' }}
@@ -26,6 +26,12 @@ jobs:
         run: bash scripts/package.sh
         env:
           BALANCE_HUD_LINUX_ARCHIVE: xz
+      - name: Exercise the packaged X11 desktop
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        run: |
+          tar -xf build/BalanceHUD-ubuntu-x64.tar.xz -C "$RUNNER_TEMP"
+          python3 scripts/smoke-x11.py "$RUNNER_TEMP/linux-amd64/balance-hud"
       - uses: actions/upload-artifact@v4
         with:
           name: BalanceHUD-${{ runner.os }}-x64
