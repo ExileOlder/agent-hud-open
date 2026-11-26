@@ -120,11 +120,30 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	if r := client(bar); r.Right != barItem || r.Bottom != 4*barItem+2*barPadding {
 		t.Fatalf("initial float geometry: %#v", r)
 	}
+	// Move the real test-runner cursor as well as posting the message. With
+	// only a synthetic WM_MOUSEMOVE, TrackMouseEvent correctly sees the
+	// cursor outside and immediately schedules a fade-out.
+	var before point
+	if u("GetCursorPos", uintptr(unsafe.Pointer(&before))) != 0 {
+		defer u("SetCursorPos", uintptr(before.X), uintptr(before.Y))
+	}
+	pointOnMark := point{46, 50}
+	if u("ClientToScreen", bar, uintptr(unsafe.Pointer(&pointOnMark))) == 0 ||
+		u("SetCursorPos", uintptr(pointOnMark.X), uintptr(pointOnMark.Y)) == 0 {
+		t.Fatal("cannot place the native runner cursor on the mark")
+	}
 	post(bar, 0x200, 0, 46, 50)
 	sawIntermediate := false
+	maxAlpha := byte(0)
+	defer func() {
+		if t.Failed() {
+			t.Logf("quota card visibility=%t maximum opacity=%d", visible(tip), maxAlpha)
+		}
+	}()
 	wait("quota card did not reach full opacity", func() bool {
 		var alpha byte
 		if visible(tip) && u("GetLayeredWindowAttributes", tip, 0, uintptr(unsafe.Pointer(&alpha)), 0) != 0 {
+			maxAlpha = max(maxAlpha, alpha)
 			if alpha > 0 && alpha < 255 {
 				sawIntermediate = true
 			}

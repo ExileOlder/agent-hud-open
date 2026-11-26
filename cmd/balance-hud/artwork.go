@@ -36,10 +36,15 @@ const (
 	hoverFrames    = 40
 	hoverCell      = 80
 	hoverColumns   = 8
+	markRadius     = 29
 )
 
 var hoverAtlas image.Image
 var barFont font.Face
+
+// Every provider mark uses the same cell and target size. Reuse the
+// high-quality filter weights and its scratch buffer between animation frames.
+var markScaler = imagedraw.CatmullRom.NewScaler(2*markRadius, 2*markRadius, hoverCell, hoverCell)
 
 var idleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(idlePNG) })
 var claudeHoverAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeHoverPNG) })
@@ -141,7 +146,7 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		}
 		x := frame % hoverColumns * hoverCell
 		y := (slot*count/hoverColumns + frame/hoverColumns) * hoverCell
-		imagedraw.CatmullRom.Scale(dst, image.Rect(cx-29, cy-29, cx+29, cy+29),
+		markScaler.Scale(dst, image.Rect(cx-markRadius, cy-markRadius, cx+markRadius, cy+markRadius),
 			atlas, image.Rect(x, y, x+hoverCell, y+hoverCell), draw.Over, nil)
 		if p.Numbers {
 			ink := q
