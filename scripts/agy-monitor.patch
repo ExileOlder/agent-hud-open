@@ -1,25 +1,19 @@
 diff --git a/cmd/agy-auth-monitor/main.go b/cmd/agy-auth-monitor/main.go
 new file mode 100644
-index 0000000..8e1f88a
+index 0000000..5e3a1dd
 --- /dev/null
 +++ b/cmd/agy-auth-monitor/main.go
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,11 @@
 +package main
 +
 +import (
-+	"fmt"
 +	"os"
 +
-+	"github.com/fikrilal/agy-auth/internal/cli"
++	"github.com/fikrilal/agy-auth/quotahelper"
 +)
 +
 +func main() {
-+	app, err := cli.NewMonitor()
-+	if err != nil {
-+		fmt.Fprintf(os.Stderr, "agy-auth-monitor: %v\n", err)
-+		os.Exit(1)
-+	}
-+	os.Exit(app.RunMonitor(os.Args[1:]))
++	os.Exit(quotahelper.Run(os.Args[1:]))
 +}
 diff --git a/internal/cli/cmd_login.go b/internal/cli/cmd_login.go
 index 7c53872..0651cf0 100644
@@ -494,3 +488,27 @@ index de5e34f..fb101d1 100644
  			{Flag: "--via-agy", Description: "Run agy in an isolated login directory; import only on success"},
  			{Flag: "--agy <path>", Description: "agy executable for OAuth client discovery or --via-agy (default: search PATH)"},
  			{Flag: "--relaunch", Description: "Relaunch Antigravity Desktop after logging in"},
+diff --git a/quotahelper/run.go b/quotahelper/run.go
+new file mode 100644
+index 0000000..7eb3106
+--- /dev/null
++++ b/quotahelper/run.go
+@@ -0,0 +1,18 @@
++// Package quotahelper exposes only the focused monitor entry point.
++package quotahelper
++
++import (
++	"fmt"
++	"os"
++
++	"github.com/fikrilal/agy-auth/internal/cli"
++)
++
++func Run(args []string) int {
++	app, err := cli.NewMonitor()
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "agy-auth-monitor: %v\n", err)
++		return 1
++	}
++	return app.RunMonitor(args)
++}

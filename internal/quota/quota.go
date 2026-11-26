@@ -176,8 +176,9 @@ func parseCodex(data []byte) (Account, error) {
 
 // Antigravity uses the separately authorized, read-only agy-auth monitor.
 // The process receives no credential through its argument list.
-func Antigravity(ctx context.Context, executable string) ([]Account, error) {
-	cmd := exec.CommandContext(ctx, executable, "--json", "usage", "--all")
+func Antigravity(ctx context.Context, executable string, prefix ...string) ([]Account, error) {
+	args := append(prefix[:len(prefix):len(prefix)], "--json", "usage", "--all")
+	cmd := exec.CommandContext(ctx, executable, args...)
 	configureProcess(cmd)
 	out, err := cmd.StdoutPipe()
 	if err != nil {

@@ -23,9 +23,17 @@ type result struct {
 	Error    string          `json:"error,omitempty"`
 }
 
+const bundledMonitorFlag = "--antigravity-helper"
+
+// Set only in portable builds; a source build still uses an external monitor.
+var bundledMonitor func([]string) int
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == bundledMonitorFlag && bundledMonitor != nil {
+		os.Exit(bundledMonitor(os.Args[2:]))
+	}
 	codex := flag.String("codex", "codex", "Codex CLI executable")
-	agy := flag.String("antigravity", monitorExecutable(), "authorized Antigravity monitor executable")
+	agy := flag.String("antigravity", "", "override the Antigravity monitor executable")
 	claude := flag.String("claude", claudeExecutable(), "Claude Code CLI executable")
 	desktop := flag.Bool("desktop", true, "open native quota HUD")
 	setup := flag.Bool("setup-mistral", false, "save a Mistral Vibe key in the Linux credential store")
@@ -59,12 +67,24 @@ func main() {
 			}
 		}
 	}
+	signInMonitor := *agy
+	var monitorPrefix []string
+	quotaMonitor := signInMonitor
+	if signInMonitor == "" {
+		signInMonitor = monitorExecutable()
+		quotaMonitor = signInMonitor
+		if bundledMonitor != nil {
+			if self, err := os.Executable(); err == nil {
+				quotaMonitor, monitorPrefix = self, []string{bundledMonitorFlag}
+			}
+		}
+	}
 	fetch := func() []result {
 		name := ""
 		if loadPlacement().ShowClaude {
 			name = *claude
 		}
-		return fetchQuotas(*codex, *agy, name)
+		return fetchQuotas(*codex, quotaMonitor, name, monitorPrefix...)
 	}
 	if *desktop {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -81,7 +101,7 @@ func main() {
 		}
 		profiles := loadAntigravityProfiles()
 		if err := runDesktop(fetch, settingsTools{
-			codex: *codex, agy: *agy, claude: *claude, notices: notices,
+			codex: *codex, agy: signInMonitor, claude: *claude, notices: notices,
 			antigravityActivity: agentactivity.WatchAntigravity(ctx, profiles),
 			antigravityWaits:    agentactivity.WatchAntigravityWaits(ctx, profiles),
 			deepSeekActivity:    agentactivity.WatchDeepSeek(ctx, deepSeekHome()),
@@ -96,7 +116,7 @@ func main() {
 	}
 }
 
-func fetchQuotas(codex, agy, claude string) []result {
+func fetchQuotas(codex, agy, claude string, monitorPrefix ...string) []result {
 	results := make([]result, 0, 3)
 	collect := func(name string, f func(context.Context) ([]quota.Account, error)) {
 		ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
@@ -115,7 +135,9 @@ func fetchQuotas(codex, agy, claude string) []result {
 		}
 		return []quota.Account{row}, nil
 	})
-	collect("antigravity", func(ctx context.Context) ([]quota.Account, error) { return quota.Antigravity(ctx, agy) })
+	collect("antigravity", func(ctx context.Context) ([]quota.Account, error) {
+		return quota.Antigravity(ctx, agy, monitorPrefix...)
+	})
 	collect("mistral", func(ctx context.Context) ([]quota.Account, error) {
 		key := strings.TrimSpace(os.Getenv("MISTRAL_VIBE_API_KEY"))
 		if key == "" {

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -212,4 +214,45 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	if err := app.Wait(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestWindowsSignInOpensUsableConsole(t *testing.T) {
+	const marker = "BALANCE_HUD_CONSOLE_TEST_MARKER"
+	if path := os.Getenv(marker); path != "" {
+		status := "console"
+		for _, f := range []*os.File{os.Stdin, os.Stdout, os.Stderr} {
+			var mode uint32
+			if err := syscall.GetConsoleMode(syscall.Handle(f.Fd()), &mode); err != nil {
+				status = err.Error()
+				break
+			}
+		}
+		if err := os.WriteFile(path, []byte(status), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if os.Getenv("BALANCE_HUD_GUI_SMOKE") != "1" {
+		t.Skip("native console check runs on the Windows CI runner")
+	}
+	path := filepath.Join(t.TempDir(), "sign-in console.txt")
+	t.Setenv(marker, path)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := openClientTerminal(exe, "-test.run=^TestWindowsSignInOpensUsableConsole$"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		status, err := os.ReadFile(path)
+		if err == nil && len(status) != 0 {
+			if string(status) != "console" {
+				t.Fatalf("sign-in terminal has unusable streams: %s", status)
+			}
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("sign-in terminal did not report its standard handles")
 }
