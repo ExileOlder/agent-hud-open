@@ -24,11 +24,13 @@ jobs:
       - name: Build portable archive
         shell: bash
         run: bash scripts/package.sh
+        env:
+          BALANCE_HUD_LINUX_ARCHIVE: xz
       - uses: actions/upload-artifact@v4
         with:
           name: BalanceHUD-${{ runner.os }}-x64
           path: |
-            build/BalanceHUD-ubuntu-x64.tar.gz
+            build/BalanceHUD-ubuntu-x64.tar.xz
             build/BalanceHUD-windows-x64.zip
           if-no-files-found: error
           compression-level: 0

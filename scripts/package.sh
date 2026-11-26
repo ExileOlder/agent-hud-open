@@ -23,7 +23,11 @@ if [[ "$os" == windows ]]; then
 else
   binary=balance-hud
   helper=agy-auth-monitor
-  archive=BalanceHUD-ubuntu-x64.tar.gz
+  case "${BALANCE_HUD_LINUX_ARCHIVE:-gzip}" in
+    gzip) archive=BalanceHUD-ubuntu-x64.tar.gz ;;
+    xz) archive=BalanceHUD-ubuntu-x64.tar.xz ;;
+    *) echo "BALANCE_HUD_LINUX_ARCHIVE must be gzip or xz." >&2; exit 2 ;;
+  esac
   python=python3
   CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags="-s -w" -o "$stage/$binary" ./cmd/balance-hud
 fi
@@ -50,7 +54,8 @@ if target.suffix == ".zip":
         for n, m in zip(files, members):
             bundle.write(stage / n, m)
 else:
-    with tarfile.open(target, "w:gz") as bundle:
+    mode = "w:xz" if target.suffix == ".xz" else "w:gz"
+    with tarfile.open(target, mode) as bundle:
         for n, m in zip(files, members):
             bundle.add(stage / n, arcname=m)
 PY
