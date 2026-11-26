@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"image"
 	"math"
 	"os"
 	"runtime"
@@ -154,7 +153,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			g("DeleteObject", region)
 		}
 	}
-	var barImage *image.RGBA
+	var painter barPainter
 	const peekHeight, peekPad, peekGap, peekSpacing, gear = 64, 30, 12, 30, 45
 	extent := func(dc uintptr, s string) point {
 		t := syscall.StringToUTF16(strings.ReplaceAll(s, "\x00", ""))
@@ -474,7 +473,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		now := time.Now()
 		frames, active := work.frames(rows, now, started, hoverStart, hover, p)
 		frames, _ = mail.cueFrames(now, p, rows, frames, active)
-		barImage = paintBar(rows, p, frames, barImage)
+		barImage := painter.paint(rows, p, frames)
 		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
 		info := struct {
 			Size                   uint32

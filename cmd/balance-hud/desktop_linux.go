@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"image"
 	"os"
 	"runtime"
 	"time"
@@ -80,14 +79,14 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 		C.free(unsafe.Pointer(help))
 	}
 	set(rows)
-	var frame *image.RGBA
+	var painter barPainter
 	started := time.Now()
 	hoverStart := started
 	lastHover := -1
 	var previousFrames markFrames
 	animating, dirty := false, true
 	paint := func(frames markFrames) {
-		frame = paintBar(rows, p, frames, frame)
+		frame := painter.paint(rows, p, frames)
 		C.hud_bitmap(h, C.int(frame.Bounds().Dx()), C.int(frame.Bounds().Dy()), (*C.uchar)(unsafe.Pointer(&frame.Pix[0])))
 	}
 	ready := make(chan []result, 1)

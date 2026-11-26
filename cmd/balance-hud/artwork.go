@@ -112,25 +112,52 @@ func barGeometry(p placement) (w, h, step int) {
 	return w, 2*barPadding + p.slotCount()*barItem, step
 }
 
-// Native display draw calls consume an opaque BGRA image; window shapes
-// clip the pill's corners. Rings are drawn with fractional pixel coverage.
-func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *image.RGBA {
+type paintedMark struct{ percent, tone, frame int }
+
+type barPainter struct {
+	bitmap   *image.RGBA
+	geometry [3]int
+	vertical bool
+	marks    [5]paintedMark
+}
+
+var dockRGBA = image.NewUniform(color.RGBA{5, 7, 9, 255})
+var dockBGRA = image.NewUniform(color.RGBA{9, 7, 5, 255})
+
+// Both native windows consume the same BGRX bitmap. Repaint the mark that
+// changed in place; the surrounding background and other marks are unchanged.
+func (b *barPainter) paint(rows []row, p placement, frames markFrames) *image.RGBA {
 	w, h, step := barGeometry(p)
-	if dst == nil || dst.Bounds().Dx() != w || dst.Bounds().Dy() != h {
-		dst = image.NewRGBA(image.Rect(0, 0, w, h))
+	geometry := [3]int{w, h, step}
+	vertical := p.Edge%2 != 0
+	full := b.bitmap == nil || b.geometry != geometry || b.vertical != vertical
+	if full {
+		if b.bitmap == nil || b.bitmap.Rect.Dx() != w || b.bitmap.Rect.Dy() != h {
+			b.bitmap = image.NewRGBA(image.Rect(0, 0, w, h))
+		}
+		b.geometry, b.vertical = geometry, vertical
+		draw.Draw(b.bitmap, b.bitmap.Bounds(), dockBGRA, image.Point{}, draw.Src)
 	}
-	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.RGBA{5, 7, 9, 255}), image.Point{}, draw.Src)
+	dst := b.bitmap
 	for i, r := range rows[:p.slotCount()] {
+		mark := paintedMark{r.Percent, r.quotaTone(), frames[i]}
+		if !full && mark == b.marks[i] {
+			continue
+		}
+		b.marks[i] = mark
 		left, top := barPadding+i*step, barPadding
-		if p.Edge%2 != 0 {
+		if vertical {
 			left, top = 0, barPadding+i*barItem
 		}
 		cx, cy := left+barItem/2, top+barItem/2
-		q := quotaInks[r.quotaTone()]
+		const patchRadius = 33
+		patch := image.Rect(cx-patchRadius, cy-patchRadius, cx+patchRadius+1, cy+patchRadius+1)
+		draw.Draw(dst, patch, dockRGBA, image.Point{}, draw.Src)
+		q := quotaInks[mark.tone]
 
 		const radius, halfStroke = 28.5, 3.3
-		for yy := cy - 33; yy <= cy+33; yy++ {
-			for xx := cx - 33; xx <= cx+33; xx++ {
+		for yy := patch.Min.Y; yy < patch.Max.Y; yy++ {
+			for xx := patch.Min.X; xx < patch.Max.X; xx++ {
 				dx, dy := float64(xx-cx)+.5, float64(yy-cy)+.5
 				rad := math.Hypot(dx, dy)
 				d := math.Abs(rad - radius)
@@ -191,10 +218,13 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 			atlas = hoverAtlas()
 		}
 		atlas.Draw(dst, image.Pt(cx-markRadius, cy-markRadius), slot*count+frame)
-	}
-	// The targets use little-endian 32-bit BGRX pixels.
-	for i := 0; i < len(dst.Pix); i += 4 {
-		dst.Pix[i], dst.Pix[i+2] = dst.Pix[i+2], dst.Pix[i]
+		for y := patch.Min.Y; y < patch.Max.Y; y++ {
+			start := dst.PixOffset(patch.Min.X, y)
+			pixels := dst.Pix[start : start+4*patch.Dx()]
+			for k := 0; k < len(pixels); k += 4 {
+				pixels[k], pixels[k+2] = pixels[k+2], pixels[k]
+			}
+		}
 	}
 	return dst
 }

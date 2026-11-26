@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
@@ -30,4 +31,38 @@ func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDockIncrementalPaintMatchesFreshPaint(t *testing.T) {
+	var painter barPainter
+	rows := view(nil)
+	p := placement{Edge: 3, Numbers: true}
+	frames := markFrames{}
+	for i := range rows {
+		rows[i].Percent = 70 - 6*i
+	}
+	check := func(label string) {
+		t.Helper()
+		var fresh barPainter
+		want := fresh.paint(rows, p, frames)
+		got := painter.paint(rows, p, frames)
+		if got.Bounds() != want.Bounds() || !bytes.Equal(got.Pix, want.Pix) {
+			t.Fatalf("%s: reused surface differs from a fresh render", label)
+		}
+	}
+	check("initial")
+	frames[1] = workBase + 18
+	check("one icon moved")
+	rows[1].Stale = true
+	check("same percentage turns stale")
+	rows[2].Percent = -1
+	check("another reading unavailable")
+	frames[1] = 0
+	check("icon returned to rest")
+	p.Edge, p.ShowClaude = 0, true
+	check("dock moved to top and gained a mark")
+	p.Numbers = false
+	check("percentages hidden")
+	p.Edge, p.ShowClaude = 3, false
+	check("side dock restored")
 }
