@@ -78,7 +78,10 @@ func runDesktop(fetch func() []result) error {
 	defer runtime.UnlockOSThread()
 	p := loadPlacement()
 	rows := view(nil)
-	var bar, tip uintptr
+	var bar, tip, notice uintptr
+	var messages []int
+	var noticeID int
+	var noticeUntil time.Time
 	var area, frame rect
 	var hover = -1
 	var pressing, moved bool
@@ -204,6 +207,13 @@ func runDesktop(fetch func() []result) error {
 			old := g("SelectObject", dc, font)
 			defer g("SelectObject", dc, old)
 		}
+		if hwnd == notice {
+			if noticeID != 0 {
+				write(dc, 12, 8, agentNames[noticeID], 0xbde572)
+				write(dc, 12, 28, "Task complete", 0xf5eee7)
+			}
+			return
+		}
 		if hwnd == tip {
 			if hover >= 0 {
 				for i, s := range strings.Split(rows[hover].Details, "\n") {
@@ -289,6 +299,16 @@ func runDesktop(fetch func() []result) error {
 		place()
 		save()
 	}
+	showNotice := func() {
+		if notice == 0 || len(messages) == 0 {
+			return
+		}
+		noticeID = messages[0]
+		messages = messages[1:]
+		noticeUntil = time.Now().Add(5 * time.Second)
+		u("SetWindowPos", notice, ^uintptr(0), uintptr(area.Right-265), uintptr(area.Bottom-68), 250, 54, 0x10|0x40)
+		invalidate(notice)
+	}
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		if msg == 0xf {
 			render(hwnd)
@@ -302,7 +322,20 @@ func runDesktop(fetch func() []result) error {
 			case 2:
 				u("PostQuitMessage", 0)
 				return 0
+			case completionMessage:
+				if wp > 0 && wp < uintptr(len(agentNames)) && len(messages) < 32 {
+					messages = append(messages, int(wp))
+					if noticeID == 0 {
+						showNotice()
+					}
+				}
+				return 0
 			case 0x113: // WM_TIMER
+				if noticeID != 0 && time.Now().After(noticeUntil) {
+					noticeID = 0
+					u("ShowWindow", notice, 0)
+					showNotice()
+				}
 				// Our non-activating window may not get button-up outside it.
 				if pressing {
 					key := uintptr(1)
@@ -411,6 +444,11 @@ func runDesktop(fetch func() []result) error {
 		return fmt.Errorf("cannot create Win32 quota popup")
 	}
 	defer u("DestroyWindow", tip)
+	notice = makeWindow("Balance HUD completion")
+	if notice == 0 {
+		return fmt.Errorf("cannot create Win32 completion popup")
+	}
+	defer u("DestroyWindow", notice)
 	place()
 	if u("SetTimer", bar, 1, 200, 0) == 0 {
 		return fmt.Errorf("cannot start Win32 quota timer")

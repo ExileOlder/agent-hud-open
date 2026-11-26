@@ -83,7 +83,11 @@ func view(results []result) []row {
 			dst.Identity = a.Label
 			lines := []string{a.Label}
 			if a.Balance != "" {
-				lines = append(lines, a.Balance)
+				balance := a.Balance
+				if r.Provider == "mistral" && len(a.Windows) > 0 {
+					balance += fmt.Sprintf(" (%.2f%% remaining)", a.Windows[0].Remaining)
+				}
+				lines = append(lines, balance)
 			}
 			low := 101.0
 			for _, w := range a.Windows {
@@ -94,7 +98,9 @@ func view(results []result) []row {
 				if t, e := time.Parse(time.RFC3339, w.Reset); e == nil {
 					line += " · resets " + t.Local().Format("Jan 2 15:04")
 				}
-				lines = append(lines, line)
+				if r.Provider != "mistral" || a.Balance == "" || w.Reset != "" {
+					lines = append(lines, line)
+				}
 			}
 			if low <= 100 {
 				dst.Percent = int(math.Round(low))

@@ -35,3 +35,10 @@ func TestLastReadingOnFailureAndAccountReplacement(t *testing.T) {
 		t.Fatalf("bad stale detail: %+v", failed[1])
 	}
 }
+
+func TestMistralShowsAmountAndPercentOnSameLine(t *testing.T) {
+	rows := view([]result{{Provider: "mistral", Accounts: []quota.Account{{Label: "Mistral Vibe", Balance: "137.14 / 150.00 USD", Windows: []quota.Window{{Name: "Subscription", Remaining: 91.426666}}}}}})
+	if !strings.Contains(rows[3].Details, "137.14 / 150.00 USD (91.43% remaining)") {
+		t.Fatal(rows[3].Details)
+	}
+}

@@ -1,6 +1,6 @@
 # Balance HUD
 
-A quota-only rewrite of [Agent HUD](https://github.com/jazzenchen/agent-hud-open) for Ubuntu/X11 and Windows x64. It has no WebView, tray framework, session indexing, agent messaging, remote access or telemetry.
+A quota-focused rewrite of [Agent HUD](https://github.com/jazzenchen/agent-hud-open) for Ubuntu/X11 and Windows x64. It has no WebView, tray framework, session indexing, agent messaging, remote access or telemetry.
 
 ## Build
 
@@ -40,8 +40,39 @@ Use a different account on the second browser authorization. If the CLI is outsi
 
 ## Use the float
 
-The four positions are Codex, Antigravity 1, Antigravity 2 and Mistral Vibe. Hover for details; drag with the primary button to dock to an edge of the primary display. Right-click to toggle numbers, middle-click to refresh, and Shift-right-click to quit. A missing reading shows `--`. If a refresh fails, the last reading for the same account is shown with a muted ring and an asterisk when numbers are enabled. The default refresh interval is five minutes. Appearance is stored in the OS user configuration directory.
+The four positions are Codex, Antigravity 1, Antigravity 2 and Mistral Vibe. Hover for details (Mistral shows balance, total and the remaining percentage together); drag with the primary button to dock to an edge of the primary display. Right-click to toggle numbers, middle-click to refresh, and Shift-right-click to quit. A missing reading shows `--`. If a refresh fails, the last reading for the same account is shown with a muted ring and an asterisk when numbers are enabled. The default refresh interval is five minutes. Appearance is stored in the OS user configuration directory.
 
 Use `-desktop=false` for a one-shot JSON read from a terminal build. This output includes account labels; review it before sharing. Test builds and current credentials are not part of the repository.
 
 Licensed under Apache-2.0; the upstream license is kept in LICENSE.
+
+## Completion popups
+
+Balance HUD shows a short, local completion reminder. It sends only the agent label, never prompt text, model output or account data. It does not scan conversation logs or run a background notification service. On Ubuntu the system displays it through `notify-send` (`libnotify-bin`); on Windows keep Balance HUD open to receive the message. Test the path with `balance-hud -completed codex` using the installed binary (or `BalanceHUD.exe`).
+
+For automatic reminders, add just the indicated completion hook to each client you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
+
+- **[Codex](https://developers.openai.com/codex/hooks):** add the handler under `hooks.Stop` in `${CODEX_HOME:-$HOME/.codex}/hooks.json`. Start a new session and approve the hook if prompted.
+
+  ```json
+  {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed codex -hook","timeout":5}]}]}}
+  ```
+
+- **[Antigravity](https://antigravity.google/docs/hooks):** add the named entry to the client's global `~/.gemini/config/hooks.json`, or the corresponding config in each separate client home. The hook ignores an early stop while background tasks are still running. An authorized quota account alone does not produce task notifications; install the hook in each actual client profile you use.
+
+  ```json
+  {"balance-hud":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed antigravity -hook","timeout":5}]}]}}
+  ```
+
+- **[Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/hooks):** add a `turn_completed` notification hook to `~/.vibe/hooks.toml` (or the active Vibe home). The Vibe subscription alone does not provide turn callbacks.
+
+  ```toml
+  [[hooks]]
+  name = "balance-hud-completion"
+  type = "notification"
+  match = "turn_completed"
+  command = "'/path/to/balance-hud' -completed mistral -hook"
+  timeout = 5
+  ```
+
+Other clients with a success-only hook can call `balance-hud -completed agent`. In Windows PowerShell commands use `& 'C:/path/to/BalanceHUD.exe' -completed codex -hook` (substitute the client name); in Git Bash use `'C:/path/to/BalanceHUD.exe'` without `&`. This program does not change agent configurations for you.

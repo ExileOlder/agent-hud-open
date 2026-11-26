@@ -25,7 +25,18 @@ func main() {
 	agy := flag.String("antigravity", monitorExecutable(), "authorized Antigravity monitor executable")
 	desktop := flag.Bool("desktop", true, "open native quota HUD")
 	setup := flag.Bool("setup-mistral", false, "save a Mistral Vibe key in the Linux credential store")
+	completion := flag.String("completed", "", "show completion reminder (codex, antigravity, mistral, agent)")
+	hook := flag.Bool("hook", false, "read completion event from the client's hook stdin")
 	flag.Parse()
+	if *completion != "" {
+		if err := runCompletion(*completion, *hook, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if !*hook {
+				os.Exit(1)
+			}
+		}
+		return
+	}
 	if *setup {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
