@@ -43,3 +43,33 @@ func TestPackedAtlasPreservesCropsAndAlpha(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupedAtlasDecodesOnlyTheRequestedActor(t *testing.T) {
+	grid := image.NewNRGBA(image.Rect(0, 0, Cell*Columns, 2*Cell))
+	grid.SetNRGBA(17, 29, color.NRGBA{R: 210, A: 119})
+	grid.SetNRGBA(33, Cell+41, color.NRGBA{G: 200, A: 175})
+	var buf bytes.Buffer
+	if err := EncodeGroup(&buf, grid, 2); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		part, err := Part(buf.Bytes(), i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		atlas, err := Open(part)
+		if err != nil || atlas.Len() != Columns {
+			t.Fatalf("provider %d: %d frames, error %v", i, atlas.Len(), err)
+		}
+		bounds := image.Rect(0, 0, Cell, Cell)
+		want, got := image.NewRGBA(bounds), image.NewRGBA(bounds)
+		draw.Draw(want, bounds, grid, image.Pt(0, Cell*i), draw.Over)
+		atlas.Draw(got, image.Point{}, 0)
+		if !bytes.Equal(want.Pix, got.Pix) {
+			t.Fatalf("provider %d did not preserve its pixels and alpha", i)
+		}
+	}
+	if _, err := Part(buf.Bytes(), 2); err == nil {
+		t.Fatal("unexpected provider accepted")
+	}
+}

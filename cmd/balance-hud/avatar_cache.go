@@ -40,18 +40,17 @@ type cachedSheet struct {
 // Owned by the native paint loop; the rest logos never keep a whole
 // animation decoded. No timer or goroutine is attached to an atlas.
 type avatarCache struct {
-	sheets     [sheetCount]cachedSheet
+	sheets     [sheetCount][4]cachedSheet
 	logos      [4]markatlas.Tile
-	ordinary   bool
-	claude     bool
+	hasLogo    [4]bool
 	nextSweep  time.Time
 	exitPixels [2]*image.RGBA
 }
 
-func (c *avatarCache) load(sheet avatarSheet, now time.Time) markatlas.Atlas {
-	s := &c.sheets[sheet]
+func (c *avatarCache) load(sheet avatarSheet, slot int, now time.Time) markatlas.Atlas {
+	s := &c.sheets[sheet][slot]
 	if s.atlas.Len() == 0 {
-		s.atlas = decodeAtlas(avatarData[sheet])
+		s.atlas = decodeAtlas(avatarData[sheet], slot)
 	}
 	s.used = now
 	return s.atlas
@@ -63,35 +62,28 @@ func (c *avatarCache) trim(now time.Time) {
 	}
 	c.nextSweep = now.Add(10 * time.Second)
 	for i := range c.sheets {
-		s := &c.sheets[i]
-		if s.atlas.Len() != 0 && now.Sub(s.used) >= avatarIdleRetention {
-			*s = cachedSheet{}
+		for j := range c.sheets[i] {
+			s := &c.sheets[i][j]
+			if s.atlas.Len() != 0 && now.Sub(s.used) >= avatarIdleRetention {
+				*s = cachedSheet{}
+			}
 		}
 	}
 }
 
 func (c *avatarCache) logo(provider, slot int) markatlas.Tile {
+	sheet, key := sheetHover, slot
 	if provider == 4 {
-		if !c.claude {
-			atlas := c.sheets[sheetClaudeHover].atlas
-			if atlas.Len() == 0 {
-				atlas = decodeAtlas(claudeHoverData)
-			}
-			c.logos[3], c.claude = atlas.CopyTile(0), true
-		}
-		return c.logos[3]
+		sheet, key = sheetClaudeHover, 3
 	}
-	if !c.ordinary {
-		atlas := c.sheets[sheetHover].atlas
+	if !c.hasLogo[key] {
+		atlas := c.sheets[sheet][slot].atlas
 		if atlas.Len() == 0 {
-			atlas = decodeAtlas(hoverData)
+			atlas = decodeAtlas(avatarData[sheet], slot)
 		}
-		for i := 0; i < 3; i++ {
-			c.logos[i] = atlas.CopyTile(i * hoverFrames)
-		}
-		c.ordinary = true
+		c.logos[key], c.hasLogo[key] = atlas.CopyTile(0), true
 	}
-	return c.logos[slot]
+	return c.logos[key]
 }
 
 func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame int, now time.Time) {
@@ -109,23 +101,20 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 		c.logo(provider, slot).Draw(dst, origin)
 		return
 	}
-	count, sheet := hoverFrames, sheetHover
+	sheet := sheetHover
 	switch {
 	case frame >= pendingBase:
 		sheet = sheetQuestion + avatarSheet((frame-pendingBase)/waitAtlasFrames)
-		frame, count = (frame-pendingBase)%waitAtlasFrames, waitAtlasFrames
+		frame = (frame - pendingBase) % waitAtlasFrames
 	case frame >= cueBase:
 		sheet = sheetQuestion + avatarSheet((frame-cueBase)/cueFrames)
-		frame, count = (frame-cueBase)%cueFrames, waitAtlasFrames
-		if sheet == sheetDone {
-			count = cueFrames
-		}
+		frame = (frame - cueBase) % cueFrames
 	case frame >= toolBase:
-		frame, count, sheet = (frame-toolBase)%toolFrames, toolFrames, sheetTool
+		frame, sheet = (frame-toolBase)%toolFrames, sheetTool
 	case frame >= workBase:
-		frame, count, sheet = frame-workBase, workFrames, sheetWork
+		frame, sheet = frame-workBase, sheetWork
 	case frame < 0:
-		frame, count, sheet = -frame-1, idleFrames, sheetIdle
+		frame, sheet = -frame-1, sheetIdle
 	}
 	if provider == 4 {
 		if sheet <= sheetWork {
@@ -134,7 +123,7 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 			slot = 3
 		}
 	}
-	c.load(sheet, now).Draw(dst, origin, slot*count+frame)
+	c.load(sheet, slot, now).Draw(dst, origin, frame)
 }
 
 // Keep the crop and its alpha premultiplied while the actor becomes its logo.

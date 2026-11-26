@@ -1,6 +1,7 @@
 package markatlas
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"image"
@@ -13,6 +14,10 @@ import (
 // The index keeps every original frame position and the runtime blends the
 // same straight-alpha PNG channels as the original grid.
 func Encode(w io.Writer, grid image.Image) error {
+	return encode(w, grid, Columns*Cell)
+}
+
+func encode(w io.Writer, grid image.Image, width int) error {
 	bounds := grid.Bounds()
 	if bounds.Dx() != Columns*Cell || bounds.Dy()%Cell != 0 {
 		return errors.New("invalid mark atlas grid")
@@ -57,7 +62,7 @@ func Encode(w io.Writer, grid image.Image) error {
 		key := string(raw)
 		at, ok := seen[key]
 		if !ok {
-			if x+cw > bounds.Dx() {
+			if x+cw > width {
 				x, y, row = 0, y+row, 0
 			}
 			at = image.Pt(x, y)
@@ -71,7 +76,7 @@ func Encode(w io.Writer, grid image.Image) error {
 		binary.LittleEndian.PutUint16(rec[2:], uint16(at.Y))
 		rec[4], rec[5], rec[6], rec[7] = byte(cw), byte(ch), byte(left), byte(upper)
 	}
-	im := image.NewNRGBA(image.Rect(0, 0, bounds.Dx(), max(1, y+row)))
+	im := image.NewNRGBA(image.Rect(0, 0, width, max(1, y+row)))
 	for _, c := range crops {
 		for cy := range c.size.Y {
 			at := im.PixOffset(c.origin.X, c.origin.Y+cy)
@@ -83,3 +88,49 @@ func Encode(w io.Writer, grid image.Image) error {
 	}
 	return (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(w, im)
 }
+
+// EncodeGroup encodes equal, contiguous sets of frames for each provider.
+func EncodeGroup(w io.Writer, grid image.Image, parts int) error {
+	if parts == 1 {
+		return Encode(w, grid)
+	}
+	b := grid.Bounds()
+	if parts < 2 || parts > 255 || b.Dx() != Cell*Columns || b.Dy() == 0 || b.Dy()%(parts*Cell) != 0 {
+		return errors.New("invalid atlas group grid")
+	}
+	height := b.Dy() / parts
+	head := make([]byte, 5+4*(parts+1))
+	copy(head, groupMagic)
+	head[4] = byte(parts)
+	var body bytes.Buffer
+	for i := range parts {
+		area := image.Rect(b.Min.X, b.Min.Y+i*height, b.Max.X, b.Min.Y+(i+1)*height)
+		var best []byte
+		var candidate bytes.Buffer
+		// Width controls how related tiles line up in PNG's scanline filter.
+		// Choose at build time; the runtime format is unchanged.
+		for _, width := range [...]int{Cell * 4, Cell * 6, Cell * 8} {
+			candidate.Reset()
+			if err := encode(&candidate, viewport{grid, area}, width); err != nil {
+				return err
+			}
+			if best == nil || candidate.Len() < len(best) {
+				best = append(best[:0], candidate.Bytes()...)
+			}
+		}
+		body.Write(best)
+		binary.LittleEndian.PutUint32(head[5+4*(i+1):], uint32(body.Len()))
+	}
+	if _, err := w.Write(head); err != nil {
+		return err
+	}
+	_, err := body.WriteTo(w)
+	return err
+}
+
+type viewport struct {
+	image.Image
+	area image.Rectangle
+}
+
+func (v viewport) Bounds() image.Rectangle { return v.area }

@@ -49,8 +49,12 @@ const (
 	markRadius     = markatlas.Cell / 2
 )
 
-func decodeAtlas(data []byte) markatlas.Atlas {
-	img, err := markatlas.Open(data)
+func decodeAtlas(data []byte, slot int) markatlas.Atlas {
+	part, err := markatlas.Part(data, slot)
+	if err != nil {
+		panic(err)
+	}
+	img, err := markatlas.Open(part)
 	if err != nil {
 		panic(err)
 	}

@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"image/png"
 	"os"
+	"strconv"
 
 	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
 
@@ -14,17 +15,21 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: compact-atlas INPUT.png OUTPUT.atlas")
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: compact-atlas INPUT.png OUTPUT.atlas PROVIDERS")
 		os.Exit(2)
 	}
-	if err := compact(os.Args[1], os.Args[2]); err != nil {
+	parts, err := strconv.Atoi(os.Args[3])
+	if err == nil {
+		err = compact(os.Args[1], os.Args[2], parts)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func compact(input, output string) error {
+func compact(input, output string, parts int) error {
 	in, err := os.Open(input)
 	if err != nil {
 		return err
@@ -57,7 +62,7 @@ func compact(input, output string) error {
 	if err != nil {
 		return err
 	}
-	err = markatlas.Encode(f, source)
+	err = markatlas.EncodeGroup(f, source, parts)
 	closeErr := f.Close()
 	if err != nil {
 		return err

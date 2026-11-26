@@ -25,9 +25,10 @@ func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 		{"completion", sheetDone, 4, cueFrames},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			want := tc.slots * tc.frames
-			if got := decodeAtlas(avatarData[tc.sheet]).Len(); got != want {
-				t.Fatalf("atlas frame count = %d, want %d", got, want)
+			for slot := range tc.slots {
+				if got := decodeAtlas(avatarData[tc.sheet], slot).Len(); got != tc.frames {
+					t.Fatalf("provider %d frame count = %d, want %d", slot, got, tc.frames)
+				}
 			}
 		})
 	}
@@ -77,16 +78,23 @@ func TestColdAtlasesCanExpireWithoutChangingLogosOrReloadedFrames(t *testing.T) 
 	}
 	logo := render(0, 0, now)
 	claudeLogo := render(4, 0, now)
-	if cache.sheets[sheetHover].atlas.Len() != 0 || cache.sheets[sheetClaudeHover].atlas.Len() != 0 {
+	if cache.sheets[sheetHover][0].atlas.Len() != 0 || cache.sheets[sheetClaudeHover][0].atlas.Len() != 0 {
 		t.Fatal("rest logos retained the hover atlases")
 	}
 	active := render(0, workBase+8, now)
+	for _, slot := range []int{1, 2} {
+		if cache.sheets[sheetWork][slot].atlas.Len() != 0 {
+			t.Fatalf("Codex work also decoded provider %d", slot)
+		}
+	}
 	// An idle visit refreshed its own sheet shortly before the sweep.
+	render(1, workBase+8, now)
 	recent := now.Add(avatarIdleRetention - time.Second)
+	render(2, workBase+8, recent) // The second Antigravity account shares the first account's frames.
 	render(1, -8, recent)
 	after := now.Add(avatarIdleRetention)
 	cache.trim(after)
-	if cache.sheets[sheetWork].atlas.Len() != 0 || cache.sheets[sheetIdle].atlas.Len() == 0 {
+	if cache.sheets[sheetWork][0].atlas.Len() != 0 || cache.sheets[sheetWork][1].atlas.Len() == 0 || cache.sheets[sheetIdle][1].atlas.Len() == 0 {
 		t.Fatal("sweep did not separate expired and recently used atlases")
 	}
 	if !bytes.Equal(logo, render(0, 0, after)) ||

@@ -15,7 +15,8 @@ renderBot (Apache-2.0). Claude Code uses separate atlases from the same recorder
 at the Agent HUD source containing `packages/hud/src/bots`. The recorder
 scales each frame to the native dock’s 58 px grid. The build trims transparent
 borders and stores identical crops once; a frame index restores their original
-positions before the native app draws them. The native app
+positions before the native app draws them. Each provider is compressed
+and decoded separately. The two Antigravity positions share one image cache. The native app
 plays the hover greeting once, keeps the character awake, then eases back to
 the logo from the pose actually shown when the pointer leaves. Each idle visit uses its own 20–35 second
 wait, as in the original. Thinking plays a contiguous entrance into the 15-second gaze, breath,

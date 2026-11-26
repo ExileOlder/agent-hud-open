@@ -23,15 +23,16 @@ print('<script src="hover.js"></script>')
 PY
 for mode in "$@"; do
   query=""
+  providers=3
   case "$mode" in
     hover) :;;
-    tool) query="?tool=tool-read";;
-    cue-question|cue-permission|cue-done) query="?cue=${mode#cue-}";;
+    tool) query="?tool=tool-read"; providers=4;;
+    cue-question|cue-permission|cue-done) query="?cue=${mode#cue-}"; providers=4;;
     idle) query="?idle";;
     work) query="?work";;
-    claude-work) query="?claude&work";;
-    claude-hover) query="?claude";;
-    claude-idle) query="?claude&idle";;
+    claude-work) query="?claude&work"; providers=1;;
+    claude-hover) query="?claude"; providers=1;;
+    claude-idle) query="?claude&idle"; providers=1;;
     *) echo "Unknown animation atlas: $mode" >&2; exit 2;;
   esac
   "${BROWSER:-chromium}" --headless=new --disable-gpu --no-first-run --user-data-dir="$tmp/profile" \
@@ -44,6 +45,6 @@ if not match:
     sys.exit(page[:1000])
 pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(match[1], validate=True))
 PY
-  go run ./scripts/compact-atlas.go "$tmp/recorded.png" "$tmp/compact.atlas"
+  go run ./scripts/compact-atlas.go "$tmp/recorded.png" "$tmp/compact.atlas" "$providers"
   mv -f "$tmp/compact.atlas" "$assets/$mode.atlas"
 done
