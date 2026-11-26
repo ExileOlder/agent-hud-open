@@ -106,6 +106,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 	notices := tools.notices
 	var work workingMarks
 	agyActivity := tools.antigravityActivity
+	agyWaits := tools.antigravityWaits
 	dshActivity := tools.deepSeekActivity
 	renderMail := func(now time.Time) {
 		var n [8]C.int
@@ -240,6 +241,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				work.updateDeepSeek(state, &mail, time.Now(), !p.ReduceMotion)
 			} else {
 				dshActivity = nil
+			}
+		case waits, ok := <-agyWaits:
+			if ok {
+				work.updateAntigravityWaits(waits, &mail, time.Now(), !p.ReduceMotion)
+			} else {
+				agyWaits = nil
 			}
 		case active, ok := <-agyActivity:
 			if ok {

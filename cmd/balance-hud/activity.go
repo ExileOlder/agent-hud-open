@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -28,10 +27,6 @@ func loadAntigravityProfiles() []agentactivity.AntigravityProfile {
 	return profiles
 }
 
-func watchAntigravity(ctx context.Context) <-chan map[string]agentactivity.Tool {
-	return agentactivity.WatchAntigravity(ctx, loadAntigravityProfiles())
-}
-
 func antigravityProfileKeys() map[string]uint32 {
 	keys := map[string]uint32{}
 	for _, p := range loadAntigravityProfiles() {
@@ -48,6 +43,7 @@ type workingMarks struct {
 	codex                   workClock
 	deepSeek                time.Time
 	agy                     map[string]workClock
+	agyWaits                map[agentactivity.AntigravityWait]markCue
 	hooks                   [2]map[uint32]workClock
 	pendingHooks            [2]map[uint32]markCue
 	codexWait, deepSeekWait markCue
@@ -120,6 +116,31 @@ func (w *workingMarks) updateAntigravity(active map[string]agentactivity.Tool, n
 		next[name] = clock
 	}
 	w.agy = next
+}
+
+func (w *workingMarks) updateAntigravityWaits(waits []agentactivity.AntigravityWait, inbox *mailInbox, now time.Time, motion bool) {
+	next := make(map[agentactivity.AntigravityWait]markCue, len(waits))
+	known := make(map[agentactivity.AntigravityWait]markCue, len(w.agyWaits))
+	for old, cue := range w.agyWaits {
+		old.Account = ""
+		known[old] = cue
+	}
+	for _, item := range waits {
+		id := item
+		id.Account = ""
+		if existing, ok := known[id]; ok {
+			next[item] = existing
+			continue
+		}
+		look := cueQuestion
+		if item.Permission {
+			look = cuePermission
+		}
+		next[item] = markCue{look, now}
+		known[id] = next[item]
+		inbox.receive(mailItem{agent: 2, account: item.Account, permission: item.Permission, event: codexnotice.Event{Question: true}}, now, motion)
+	}
+	w.agyWaits = next
 }
 
 type workClock struct {
@@ -216,7 +237,7 @@ func (w *workingMarks) ages(rows []row, now time.Time) [5]time.Duration {
 func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hover int, p placement) (markFrames, bool) {
 	var frames markFrames
 	if p.ReduceMotion {
-		return w.applyWaiting(frames, false, p, now)
+		return w.applyWaiting(frames, false, p, now, rows)
 	}
 	ages := w.ages(rows, now)
 	tool := [5]workClock{
@@ -255,11 +276,21 @@ func (w *workingMarks) frames(rows []row, now, start, hoverStart time.Time, hove
 		}
 		frames[slot], active = frame, active || moving
 	}
-	return w.applyWaiting(frames, active, p, now)
+	return w.applyWaiting(frames, active, p, now, rows)
 }
 
-func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement, now time.Time) (markFrames, bool) {
+func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement, now time.Time, rows []row) (markFrames, bool) {
 	cues := [5]markCue{0: w.codexWait, 3: w.deepSeekWait}
+	for wait, cue := range w.agyWaits {
+		if wait.Account == "" {
+			continue
+		}
+		for slot := 1; slot <= 2; slot++ {
+			if strings.EqualFold(rows[slot].Identity, wait.Account) && takesWaitingCue(cues[slot], cue) {
+				cues[slot] = cue
+			}
+		}
+	}
 	for i, sessions := range w.pendingHooks {
 		slot := i + 3
 		for session, cue := range sessions {
@@ -267,8 +298,7 @@ func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement,
 				delete(sessions, session)
 				continue
 			}
-			current := cues[slot]
-			if current.at.IsZero() || cue.look > current.look || cue.look == current.look && cue.at.Before(current.at) {
+			if takesWaitingCue(cues[slot], cue) {
 				cues[slot] = cue
 			}
 		}
@@ -282,4 +312,8 @@ func (w *workingMarks) applyWaiting(frames markFrames, active bool, p placement,
 		active = active || anim
 	}
 	return frames, active
+}
+
+func takesWaitingCue(current, cue markCue) bool {
+	return current.at.IsZero() || cue.look > current.look || cue.look == current.look && cue.at.Before(current.at)
 }

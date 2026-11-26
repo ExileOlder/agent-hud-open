@@ -31,6 +31,7 @@ type mailItem struct {
 	event      codexnotice.Event
 	permission bool
 	profile    uint32
+	account    string
 }
 
 func (item mailItem) tone() int {
@@ -156,12 +157,22 @@ func (m *mailInbox) clearWaitCue(slot int) {
 	}
 }
 func (m *mailInbox) sourceSlot(item mailItem, rows []row) int {
+	if item.agent == 2 && item.account != "" {
+		for slot := 1; slot <= 2; slot++ {
+			if strings.EqualFold(rows[slot].Identity, item.account) {
+				return slot
+			}
+		}
+	}
 	if item.agent == 2 && item.profile != 0 {
 		for _, i := range []int{1, 2} {
 			if m.profiles[strings.ToLower(rows[i].Identity)] == item.profile {
 				return i
 			}
 		}
+	}
+	if item.agent == 2 && item.event.Question {
+		return -1 // No account attribution for a shared or unknown service.
 	}
 	return completionSlot(item.agent)
 }

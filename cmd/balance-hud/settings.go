@@ -14,6 +14,7 @@ type settingsTools struct {
 	codex, agy, claude  string
 	notices             <-chan codexnotice.Event
 	antigravityActivity <-chan map[string]agentactivity.Tool
+	antigravityWaits    <-chan []agentactivity.AntigravityWait
 	deepSeekActivity    <-chan agentactivity.DeepSeekStatus
 }
 type settingsItem struct{ title, value string }

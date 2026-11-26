@@ -149,7 +149,7 @@ For separate Antigravity profiles, create `BalanceHUD/activity-antigravity.json`
 ]
 ```
 
-On Windows use the same fields with absolute Windows paths (JSON accepts forward slashes). Balance HUD uses Antigravity’s recent transcript lifecycle fields for activity and does not display or store transcript contents. Quota refresh and completion hooks continue to work without this mapping.
+On Windows use the same fields with absolute Windows paths (JSON accepts forward slashes). Balance HUD reads lifecycle metadata for working animations. A running Antigravity version that publishes a local daemon registration also supplies pending approval and question state. The standard Gemini home is detected automatically; add the profile mapping above for additional homes. Those notices show only a short status and double-click opens Antigravity to respond there. A shared daemon is matched to the account its running client reports. If the client cannot identify the account, the inbox still shows the notice without assigning it to either mark. Quota refresh and completion hooks continue to work without this mapping.
 
 Other clients with a success-only hook can call `balance-hud -completed agent`. In Windows PowerShell commands use `& 'C:/path/to/BalanceHUD.exe' -completed codex -hook` (substitute the client name); in Git Bash use `'C:/path/to/BalanceHUD.exe'` without `&`. This program does not change agent configurations for you.
 

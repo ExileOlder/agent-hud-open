@@ -79,3 +79,50 @@ func TestNativeToolPoseTransitions(t *testing.T) {
 		t.Fatalf("finishing stops the working pose: %v", got)
 	}
 }
+
+func TestAntigravityWaitingInboxTracksBothProfiles(t *testing.T) {
+	now := time.Now()
+	rows := view(nil)
+	rows[1].Identity, rows[2].Identity = "one@example.test", "two@example.test"
+	var inbox mailInbox
+	var work workingMarks
+	initial := []agentactivity.AntigravityWait{{Account: rows[1].Identity, Cascade: "one"}, {Account: rows[2].Identity, Cascade: "two", Permission: true}}
+	work.updateAntigravityWaits(initial, &inbox, now, true)
+	if len(inbox.queue) != 2 || inbox.sourceSlot(inbox.queue[0], rows) != 1 || inbox.sourceSlot(inbox.queue[1], rows) != 2 || !inbox.queue[1].permission {
+		t.Fatal("native notices did not use their own marks")
+	}
+	work.updateAntigravityWaits(initial, &inbox, now, true)
+	if len(inbox.queue) != 2 {
+		t.Fatal("a repeated snapshot duplicated the notices")
+	}
+	work.updateAntigravityWaits(initial[1:], &inbox, now, true)
+	rows[1], rows[2] = rows[2], rows[1]
+	frames, _ := work.frames(rows, now, now, now, -1, placement{})
+	if frames[1] < pendingBase || frames[2] >= pendingBase {
+		t.Fatal("clearing one request or swapping positions moved the wrong state")
+	}
+	work.updateAntigravityWaits(nil, &inbox, now, true)
+	frames, _ = work.frames(rows, now, now, now, -1, placement{})
+	if frames[1] >= pendingBase || len(inbox.queue) != 2 {
+		t.Fatal("resolved requests should lose the waiting pose but retain the notification")
+	}
+}
+
+func TestAntigravityWaitingAttributionDoesNotResendNotice(t *testing.T) {
+	now := time.Now()
+	var inbox mailInbox
+	var work workingMarks
+	wait := agentactivity.AntigravityWait{Cascade: "fixture", Trajectory: "attempt"}
+	work.updateAntigravityWaits([]agentactivity.AntigravityWait{wait}, &inbox, now, true)
+	rows := view(nil)
+	rows[2].Identity = "two@example.test"
+	if len(inbox.queue) != 1 || inbox.sourceSlot(inbox.queue[0], rows) != -1 {
+		t.Fatal("unknown source should not be assigned to the first account")
+	}
+	wait.Account = rows[2].Identity
+	work.updateAntigravityWaits([]agentactivity.AntigravityWait{wait}, &inbox, now.Add(time.Second), true)
+	frames, _ := work.frames(rows, now.Add(time.Second), now, now, -1, placement{})
+	if len(inbox.queue) != 1 || frames[1] >= pendingBase || frames[2] < pendingBase {
+		t.Fatal("verifying the account should move the waiting pose without adding a second notice")
+	}
+}

@@ -79,7 +79,13 @@ func main() {
 		if home != "" {
 			notices = codexnotice.Watch(ctx, home)
 		}
-		if err := runDesktop(fetch, settingsTools{codex: *codex, agy: *agy, claude: *claude, notices: notices, antigravityActivity: watchAntigravity(ctx), deepSeekActivity: agentactivity.WatchDeepSeek(ctx, deepSeekHome())}); err != nil {
+		profiles := loadAntigravityProfiles()
+		if err := runDesktop(fetch, settingsTools{
+			codex: *codex, agy: *agy, claude: *claude, notices: notices,
+			antigravityActivity: agentactivity.WatchAntigravity(ctx, profiles),
+			antigravityWaits:    agentactivity.WatchAntigravityWaits(ctx, profiles),
+			deepSeekActivity:    agentactivity.WatchDeepSeek(ctx, deepSeekHome()),
+		}); err != nil {
 			println(err.Error())
 			os.Exit(1)
 		}
