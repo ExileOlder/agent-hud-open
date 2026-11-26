@@ -17,6 +17,14 @@ import (
 	"github.com/ExileOlder/agent-hud-open/internal/quota"
 )
 
+func TestApprovalMessageKeepsBothUUIDHalves(t *testing.T) {
+	const first, second = 0x1198feedcafedead, 0xf0e1d2c3b4a59687
+	id := approvalFromMessage(uintptr(first), uintptr(second))
+	if got := id.route(); got != "addefeca-edfe-9811-8796-a5b4c3d2e1f0" {
+		t.Fatalf("received the wrong Codex UUID: %s", got)
+	}
+}
+
 func TestWindowsNativeSmoke(t *testing.T) {
 	if os.Getenv("BALANCE_HUD_GUI_CHILD") == "1" {
 		// Drive the exact desktop loop, with quota/account data independent of
@@ -206,6 +214,15 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	wait("dock inbox did not open independently", func() bool { return visible(inbox) })
 	post(inbox, 0x202, 0, client(inbox).Right-40, mailHeader+29)
 	wait("single-row dismiss did not close the empty badge and inbox", func() bool { return !visible(badge) && !visible(inbox) })
+	if err := notifyApproval(ctx, parseApprovalThread("cdefabcd-1234-5678-9abc-def012345678")); err != nil {
+		t.Fatal(err)
+	}
+	wait("approval did not launch a paper flight", func() bool { return visible(paper) })
+	wait("approval did not land at dock inbox", func() bool { return visible(badge) && !visible(paper) })
+	post(badge, 0x202, 0, 40, 40)
+	wait("approval inbox did not open", func() bool { return visible(inbox) })
+	post(inbox, 0x202, 0, client(inbox).Right-40, mailHeader+29)
+	wait("approval could not be dismissed independently", func() bool { return !visible(badge) && !visible(inbox) })
 	if err := notifyHook(ctx, 5, 0); err != nil {
 		t.Fatal(err)
 	}

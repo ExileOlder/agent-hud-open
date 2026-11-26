@@ -17,7 +17,8 @@ void hud_settings_sync(Hud *,int,int,const char *);
 void hud_settings_show(Hud *);
 void hud_appearance(Hud *,int,double,int,int);
 
-int hud_post_completion(int,unsigned int);
+int hud_post_completion(int,unsigned int,const unsigned int *);
+unsigned int hud_hook_route(Hud *,int);
 unsigned int hud_hook_session(Hud *);
 
 void hud_slots(Hud *,int);

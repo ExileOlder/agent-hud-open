@@ -20,7 +20,7 @@ struct Hud {
     Display *d;
     Window root, bar, tip, prefs, notice, mail_panel, paper;
     Atom wm_delete, opacity, completion;
-    unsigned int hook_session;
+    unsigned int hook_session, hook_route[4];
     GC gc;
     XftFont *font, *heading, *prefs_font, *notice_font, *mail_small, *mail_title, *mail_header_font;
     XftDraw *tip_draw, *prefs_draw, *notice_draw, *mail_draw, *bar_draw;
@@ -695,7 +695,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion) {
     return h;
 }
 // Local X11 IPC: lifecycle code and opaque local session key.
-int hud_post_completion(int code,unsigned int session) {
+int hud_post_completion(int code,unsigned int session,const unsigned int *route) {
     Display *d=XOpenDisplay(NULL);
     if(!d)return 0;
     Atom message=XInternAtom(d,"_BALANCE_HUD_COMPLETION",True);
@@ -708,12 +708,14 @@ int hud_post_completion(int code,unsigned int session) {
     e.xclient.format=32;
     e.xclient.data.l[0]=code;
     e.xclient.data.l[1]=(long)session;
+    if(route)for(int i=0;i<4;i++)e.xclient.data.l[i+1]=(long)route[i];
     int ok=XSendEvent(d,owner,False,NoEventMask,&e);
     XCloseDisplay(d);
     return ok!=0;
 }
 
 unsigned int hud_hook_session(Hud *h){return h->hook_session;}
+unsigned int hud_hook_route(Hud *h,int i){return h->hook_route[i];}
 
 void hud_close(Hud *h) {
     if(h->bar_draw)XftDrawDestroy(h->bar_draw);
@@ -816,6 +818,7 @@ int hud_step(Hud *h,int timeout) {
             long code=e.xclient.data.l[0];
             if(code>=1&&code<64){
                 h->hook_session=(unsigned int)e.xclient.data.l[1];
+                for(int i=0;i<4;i++)h->hook_route[i]=(unsigned int)e.xclient.data.l[i+1];
                 return 200+(int)code;
             }
             continue;

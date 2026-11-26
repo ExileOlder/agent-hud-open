@@ -30,7 +30,7 @@ func TestIdleAndHoverHaveSeparateEntrances(t *testing.T) {
 	if f, active := mark.frame(at.Add(time.Second), true, 8*time.Second, false, -1); f < 36 || !active {
 		t.Fatalf("long hover replayed its greeting: %v %v", f, active)
 	}
-	if f, active := mark.frame(at.Add(2*time.Second), false, 0, false, -1); f != 12 || !active {
+	if f, active := mark.frame(at.Add(2*time.Second), false, 0, false, -1); f != exitFrame(mark.hoverFrame, 0) || !active {
 		t.Fatalf("hover should ease back: %v %v", f, active)
 	}
 }
@@ -41,15 +41,25 @@ func TestWorkingCadenceMatchesOriginalPhases(t *testing.T) {
 	for _, age := range []time.Duration{0, 4 * time.Second, 8 * time.Second, 12*time.Second + 500*time.Millisecond} {
 		got, active := mark.frame(now.Add(age), true, 0, true, age)
 		n := int(age * workFPS / time.Second)
-		if n >= workEntry {
-			n += workEntry
-		}
 		if !active || got != workBase+n {
 			t.Fatal(age, got, active)
 		}
 	}
-	if got, _ := mark.frame(now.Add(workCycle), false, 0, true, workCycle); got != workBase+workEntry {
-		t.Fatal(got)
+	// The first steady cycle continues straight through the entrance.
+	// After it, the cycle resumes at its steady phase instead of frame zero.
+	for _, tc := range []struct{ index, want int }{
+		{workEntry - 1, workEntry - 1},
+		{workEntry, workEntry},
+		{90, 90},
+		{97, 97},
+		{98, workEntry},
+		{99, workEntry + 1},
+		{188, workEntry},
+	} {
+		age := (time.Duration(tc.index)*time.Second + workFPS - 1) / workFPS
+		if got, _ := mark.frame(now.Add(age), false, 0, true, age); got != workBase+tc.want {
+			t.Errorf("working tick %d drew %d, want %d", tc.index, got-workBase, tc.want)
+		}
 	}
 	if last, restart := toolFrame(agentactivity.Read, toolCycle-time.Millisecond), toolFrame(agentactivity.Read, toolCycle); last != toolBase+35 || restart != toolBase {
 		t.Fatal(last, restart)

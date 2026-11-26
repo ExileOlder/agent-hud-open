@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"image/draw"
 	"time"
 
 	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
@@ -39,11 +40,12 @@ type cachedSheet struct {
 // Owned by the native paint loop; the rest logos never keep a whole
 // animation decoded. No timer or goroutine is attached to an atlas.
 type avatarCache struct {
-	sheets    [sheetCount]cachedSheet
-	logos     [4]markatlas.Tile
-	ordinary  bool
-	claude    bool
-	nextSweep time.Time
+	sheets     [sheetCount]cachedSheet
+	logos      [4]markatlas.Tile
+	ordinary   bool
+	claude     bool
+	nextSweep  time.Time
+	exitPixels [2]*image.RGBA
 }
 
 func (c *avatarCache) load(sheet avatarSheet, now time.Time) markatlas.Atlas {
@@ -94,6 +96,15 @@ func (c *avatarCache) logo(provider, slot int) markatlas.Tile {
 
 func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame int, now time.Time) {
 	slot := [...]int{0, 1, 1, 2, 0}[provider]
+	if frame < -idleFrames {
+		index := -frame - idleFrames - 1
+		if step := index % exitSteps; step == 0 {
+			c.draw(dst, origin, provider, index/exitSteps, now)
+		} else {
+			c.drawExit(dst, origin, provider, index/exitSteps, step, now)
+		}
+		return
+	}
 	if frame == 0 {
 		c.logo(provider, slot).Draw(dst, origin)
 		return
@@ -124,4 +135,21 @@ func (c *avatarCache) draw(dst *image.RGBA, origin image.Point, provider, frame 
 		}
 	}
 	c.load(sheet, now).Draw(dst, origin, slot*count+frame)
+}
+
+// Keep the crop and its alpha premultiplied while the actor becomes its logo.
+// Only the active hover exit needs these two reusable mark-sized surfaces.
+func (c *avatarCache) drawExit(dst *image.RGBA, origin image.Point, provider, from, step int, now time.Time) {
+	for i, frame := range [2]int{0, from} {
+		if c.exitPixels[i] == nil {
+			c.exitPixels[i] = image.NewRGBA(image.Rect(0, 0, markatlas.Cell, markatlas.Cell))
+		}
+		clear(c.exitPixels[i].Pix)
+		c.draw(c.exitPixels[i], image.Point{}, provider, frame, now)
+	}
+	logo, actor := c.exitPixels[0], c.exitPixels[1]
+	for i, v := range actor.Pix {
+		actor.Pix[i] = uint8((int(v)*(exitSteps-step) + int(logo.Pix[i])*step + exitSteps/2) / exitSteps)
+	}
+	draw.Draw(dst, actor.Bounds().Add(origin), actor, image.Point{}, draw.Over)
 }

@@ -35,8 +35,8 @@ func TestWaitingStateIsIndependentOfInboxAndSessions(t *testing.T) {
 	now := time.Now()
 	w.updateCodex(codexnotice.Event{Pending: true}, &mail, now)
 	w.updateDeepSeek(agentactivity.DeepSeekStatus{Pending: true, Questions: 1}, &mail, now, false)
-	w.hook(hookEvent{5, hookWait, 10}, &mail, now, false)
-	w.hook(hookEvent{5, hookPermission, 20}, &mail, now, false)
+	w.hook(hookEvent{agent: 5, phase: hookWait, session: 10}, &mail, now, false)
+	w.hook(hookEvent{agent: 5, phase: hookPermission, session: 20}, &mail, now, false)
 	mail.action(92)
 	p := placement{ShowClaude: true}
 	frames := func() markFrames {
@@ -47,11 +47,11 @@ func TestWaitingStateIsIndependentOfInboxAndSessions(t *testing.T) {
 	if got := frames(); got[0] < pendingBase || got[3] < pendingBase || got[4] < pendingBase+waitAtlasFrames {
 		t.Fatalf("clear removed pending state: %v", got)
 	}
-	w.hook(hookEvent{5, hookWork, 20}, &mail, now.Add(time.Second), false)
+	w.hook(hookEvent{agent: 5, phase: hookWork, session: 20}, &mail, now.Add(time.Second), false)
 	if f := frames()[4]; f < pendingBase || f >= pendingBase+waitAtlasFrames {
 		t.Fatalf("remaining question hidden: %d", f)
 	}
-	w.hook(hookEvent{5, hookEnd, 10}, &mail, now.Add(time.Second), false)
+	w.hook(hookEvent{agent: 5, phase: hookEnd, session: 10}, &mail, now.Add(time.Second), false)
 	w.updateCodex(codexnotice.Event{Working: true}, &mail, now.Add(time.Second))
 	w.updateDeepSeek(agentactivity.DeepSeekStatus{}, &mail, now.Add(time.Second), false)
 	for i, f := range frames() {

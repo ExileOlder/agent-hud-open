@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompletionEvents(t *testing.T) {
@@ -50,5 +51,31 @@ func TestNativeLifecyclePayload(t *testing.T) {
 		if tc.valid && (e.agent != tc.agent || e.phase != tc.phase || e.session == 0 || e != decodeHook(e.code(), e.session)) || !tc.valid && e.agent != 0 {
 			t.Errorf("%s mapped to %+v", tc.payload, e)
 		}
+	}
+}
+
+func TestCodexApprovalKeepsOnlyConversationRoute(t *testing.T) {
+	const thread = "cdefabcd-1234-5678-9abc-def012345678"
+	event := parseHook(1, strings.NewReader(`{"hook_event_name":"PermissionRequest","session_id":"`+strings.ToUpper(thread)+`","tool_input":{"command":"private","description":"private"}}`))
+	want := hookEvent{agent: 1, phase: hookPermission, thread: parseApprovalThread(thread)}
+	if event != want {
+		t.Fatalf("unexpected projected metadata: %+v", event)
+	}
+	var m mailInbox
+	now := time.Now()
+	m.codexApproval(event.thread, now, true)
+	if len(m.queue) != 1 || len(m.items) != 0 {
+		t.Fatal("approval must start from the dock, then land in the inbox")
+	}
+	m.advance(now.Add(mailFlight), true)
+	if len(m.items) != 1 {
+		t.Fatal("approval did not land")
+	}
+	item := m.items[0]
+	if !item.permission || item.summary() != "等你确认一下" || clientRoute(0, item.event.Thread) != "codex://threads/"+thread {
+		t.Fatalf("unexpected approval notice: %+v", item)
+	}
+	if invalid := parseApprovalThread("cdefabcd-1234-5678-9abc-def012345678?extra"); invalid.route() != "" {
+		t.Fatal("unrecognized session ID must not change the Codex route")
 	}
 }

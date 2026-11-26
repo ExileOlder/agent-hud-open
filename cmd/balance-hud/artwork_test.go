@@ -95,3 +95,30 @@ func TestColdAtlasesCanExpireWithoutChangingLogosOrReloadedFrames(t *testing.T) 
 		t.Fatal("expiry or reloading changed frame pixels")
 	}
 }
+
+func TestAllMarksLeaveHoverFromDisplayedPose(t *testing.T) {
+	now := time.Now()
+	for slot := range (markFrames{}) {
+		var rest markRest
+		var cache avatarCache
+		const hoverAge = 3300 * time.Millisecond
+		frame, _ := rest.frame(now, true, hoverAge, false, -1)
+		render := func(frame int) []byte {
+			dst := image.NewRGBA(image.Rect(0, 0, markRadius*2, markRadius*2))
+			cache.draw(dst, image.Point{}, slot, frame, now)
+			return dst.Pix
+		}
+		actor, logo := render(frame), render(0)
+		first, _ := rest.frame(now, false, 0, false, -1)
+		mid, _ := rest.frame(now.Add(hoverExit/2), false, 0, false, -1)
+		last, active := rest.frame(now.Add(hoverExit), false, 0, false, -1)
+		if !bytes.Equal(render(first), actor) || active || last != 0 {
+			t.Fatalf("slot %d: exit did not connect the last drawn pose to the logo", slot)
+		}
+		for i, got := range render(mid) {
+			if want := uint8((int(actor[i]) + int(logo[i]) + 1) / 2); got != want {
+				t.Fatalf("slot %d: midpoint replayed a pose at pixel component %d", slot, i)
+			}
+		}
+	}
+}

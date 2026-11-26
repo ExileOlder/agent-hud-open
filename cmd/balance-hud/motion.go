@@ -26,24 +26,32 @@ const (
 	waitAtlasFrames = 40
 )
 
-type markFrames [5]int // zero: logo; negative: idle; workBase and higher: working atlas
+type markFrames [5]int // zero: logo; negative: idle or hover exit; workBase and higher: work/cue atlases
+
+const (
+	hoverExit = 500 * time.Millisecond // upstream BotMotion's morph stride
+	exitSteps = 12
+)
+
+func exitFrame(from, step int) int { return -idleFrames - 1 - from*exitSteps - step }
 
 // Each mark has its own idle visit clock. The original delays visits by
 // 20–35s and starts a new wait after the visit, not from the process clock.
 type markRest struct {
 	nextVisit, leftHover time.Time
 	hovered              bool
-	hoverAge             time.Duration
+	hoverFrame           int
 }
 
 func (r *markRest) frame(now time.Time, hovered bool, hoverAge time.Duration, working bool, age time.Duration) (int, bool) {
 	if working || hovered {
 		r.nextVisit, r.leftHover = time.Time{}, time.Time{}
-		r.hovered, r.hoverAge = hovered, hoverAge
+		r.hovered = hovered && !working
 		if working {
 			n := int(age * workFPS / time.Second)
-			if n >= workEntry {
-				n = workEntry + n%int(workCycle*workFPS/time.Second)
+			loop := int(workCycle * workFPS / time.Second)
+			if n >= workEntry+loop {
+				n = workEntry + (n-workEntry)%loop
 			}
 			return workBase + n, true
 		}
@@ -53,15 +61,18 @@ func (r *markRest) frame(now time.Time, hovered bool, hoverAge time.Duration, wo
 		if n >= hoverFrames {
 			n = awake + (n-awake)%(hoverFrames-awake)
 		}
+		r.hoverFrame = n
 		return n, true
 	}
 	if r.hovered {
 		r.hovered, r.leftHover = false, now
 	}
 	if !r.leftHover.IsZero() {
-		remaining := min(r.hoverAge, 500*time.Millisecond) - now.Sub(r.leftHover)
-		if remaining > 0 {
-			return int(remaining * hoverFPS / time.Second), true
+		step := int(now.Sub(r.leftHover) * exitSteps / hoverExit)
+		if step < exitSteps && r.hoverFrame != 0 {
+			// Start at the pose actually on screen. Reversing the opening
+			// clip can replay the greeting hop when the pointer leaves.
+			return exitFrame(r.hoverFrame, step), true
 		}
 		r.leftHover = time.Time{}
 	}

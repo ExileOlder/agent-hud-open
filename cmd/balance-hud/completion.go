@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/ExileOlder/agent-hud-open/internal/agentactivity"
@@ -65,11 +66,13 @@ const (
 	hookPermission
 )
 const hookPhaseStep = 8
+const codexApprovalCode = 1 + hookPhaseStep*int(hookPermission)
 
 type hookEvent struct {
 	agent   int
 	phase   hookPhase
 	session uint32
+	thread  approvalThread
 }
 
 func (e hookEvent) code() int { return e.agent + hookPhaseStep*int(e.phase) }
@@ -81,7 +84,7 @@ func decodeHook(code int, session uint32) hookEvent {
 	if phase != hookComplete && ((agent != 3 && agent != 5) || session == 0) {
 		return hookEvent{}
 	}
-	return hookEvent{agent, phase, session}
+	return hookEvent{agent: agent, phase: phase, session: session}
 }
 
 func parseHook(id int, r io.Reader) hookEvent {
@@ -110,6 +113,9 @@ func parseHook(id int, r io.Reader) hookEvent {
 	phase := hookComplete
 	switch id {
 	case 1:
+		if event.Event == "PermissionRequest" {
+			return hookEvent{agent: id, phase: hookPermission, thread: parseApprovalThread(event.Session)}
+		}
 		if event.Event != "Stop" {
 			return hookEvent{}
 		}
@@ -232,5 +238,27 @@ func runCompletion(name string, hook bool, input io.Reader, output io.Writer) er
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	if event.agent == 1 && event.phase == hookPermission {
+		return notifyApproval(ctx, event.thread)
+	}
 	return notifyHook(ctx, event.code(), event.session)
+}
+
+// Only the UUID reaches the GUI. Tool names, approval reasons and payloads
+// stay in the client; an unfamiliar session ID opens Codex without a route.
+type approvalThread [16]byte
+
+func parseApprovalThread(id string) (thread approvalThread) {
+	if codexThreadID.MatchString(id) {
+		_, _ = hex.Decode(thread[:], []byte(strings.ReplaceAll(id, "-", "")))
+	}
+	return
+}
+
+func (t approvalThread) route() string {
+	if t == (approvalThread{}) {
+		return ""
+	}
+	id := hex.EncodeToString(t[:])
+	return id[:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:]
 }

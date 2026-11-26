@@ -15,7 +15,7 @@ const cell = compact ? 64 : 80, side = compact ? 43 : 54, count = 96, columns = 
 const idleFPS = 16, idleCount = 88;
 const idle = query.has("idle");
 const work = query.has("work");
-const workFPS = 6, workCount = 104; // 15s: both gaze sides, breathing and dots
+const workFPS = 6, workCount = 104; // contiguous entrance + first steady cycle; final tile is held thinking
 const toolFPS = 8, toolCount = 40; // 4.5s: 3s of beats, 1.5s of rest
 const doneCount = 40;
 const keys = compact ? ["openai", "antigravity", "deepseek", "claude"] : query.has("claude") ? ["claude"] : ["openai", "antigravity", "deepseek"];
@@ -78,7 +78,7 @@ async function record() {
       // alternating repeat movements at 3.8s and 6.4s from BotMoves.
       const age = wait && i >= 24
         ? (i < 32 ? 3.8 : 6.4) + ((i - 24) % 8) / frameRate
-        : work && i >= 8 ? 15 + (i - 8) / frameRate : i / frameRate;
+        : i / frameRate;
       const time = start / frameRate + age;
       if (work && i === frames - 1)
         motion.set(botState({look: "thinking", holds: true}), lastSample);

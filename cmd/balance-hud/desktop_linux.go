@@ -12,6 +12,7 @@ import "C"
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -21,10 +22,21 @@ import (
 )
 
 func notifyHook(_ context.Context, code int, session uint32) error {
-	if C.hud_post_completion(C.int(code), C.uint(session)) != 0 {
+	if C.hud_post_completion(C.int(code), C.uint(session), nil) != 0 {
 		return nil
 	}
 	return errors.New("start Balance HUD before sending a completion reminder")
+}
+
+func notifyApproval(_ context.Context, thread approvalThread) error {
+	var route [4]C.uint
+	for i := range route {
+		route[i] = C.uint(binary.LittleEndian.Uint32(thread[4*i:]))
+	}
+	if C.hud_post_completion(C.int(codexApprovalCode), 0, &route[0]) == 0 {
+		return errors.New("start Balance HUD before sending an approval reminder")
+	}
+	return nil
 }
 
 func runDesktop(fetch func() []result, clients ...settingsTools) error {
@@ -183,6 +195,12 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			if item, ok := mail.action(action); ok {
 				openNotice(item)
 			}
+		case action == 200+codexApprovalCode:
+			var thread approvalThread
+			for i := range 4 {
+				binary.LittleEndian.PutUint32(thread[4*i:], uint32(C.hud_hook_route(h, C.int(i))))
+			}
+			mail.codexApproval(thread, time.Now(), !p.ReduceMotion)
 		case action >= 200:
 			event := decodeHook(action-200, uint32(C.hud_hook_session(h)))
 			work.hook(event, &mail, time.Now(), !p.ReduceMotion)

@@ -681,6 +681,11 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			case 2:
 				u("PostQuitMessage", 0)
 				return 0
+			case approvalMessage:
+				now := time.Now()
+				mail.codexApproval(approvalFromMessage(wp, lp), now, !p.ReduceMotion)
+				renderMail(now)
+				return 0
 			case completionMessage:
 				now := time.Now()
 				work.hook(decodeHook(int(wp), uint32(lp)), &mail.mailInbox, now, !p.ReduceMotion)

@@ -63,6 +63,10 @@ type mailInbox struct {
 	agyCues      map[uint32]markCue
 }
 
+func (m *mailInbox) codexApproval(thread approvalThread, now time.Time, motion bool) {
+	m.receive(mailItem{agent: 1, permission: true, event: codexnotice.Event{Thread: thread.route(), Question: true}}, now, motion)
+}
+
 func (m *mailInbox) receive(item mailItem, now time.Time, motion bool) {
 	if motion {
 		look := cueDone

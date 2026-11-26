@@ -62,8 +62,8 @@ cards send a paper plane to the message badge at the end of the dock. Hover or
 click the badge to open the message list. Use a row’s **×** to dismiss it, or
 **全部清空** to clear the list. With animation enabled, the source
 mark shows a question, approval, or completion gesture when that event arrives.
-Pending questions and approvals keep their mark visible with intermittent
-movement until the client reports progress or closure. Clearing the inbox does
+Pending questions and approvals observed through a live client state keep
+their mark visible with intermittent movement until that state clears. Clearing the inbox does
 not dismiss a client's outstanding request. Another still-running turn keeps
 its working expression on completion.
 Balance HUD reads event types and IDs
@@ -87,12 +87,24 @@ Mistral quota source and the Harness task state are independent. On Linux the
 mark uses the installed `deepseek-harness-tools.desktop` shortcut; Windows
 uses the Harness’s `dsh://open` handler.
 
-For automatic reminders, add just the indicated completion hook to each client you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
+For automatic reminders, add the indicated hooks for the clients you use. **Merge** the entry into your existing configuration; don't replace other hooks. Use the absolute path to the installed executable, quoted for the client's shell, and authorize the new hook if the client requests it. The examples below show Ubuntu paths.
 
 - **[Codex](https://developers.openai.com/codex/hooks), only for versions without history integration:** add the handler under `hooks.Stop` in `${CODEX_HOME:-$HOME/.codex}/hooks.json`. Start a new session and approve the hook if prompted.
 
   ```json
   {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed codex -hook","timeout":5}]}]}}
+  ```
+
+- **Codex approval reminders:** add a `PermissionRequest` handler in the same
+  `hooks.json`, including when local history integration is available. Review
+  and trust the handler in Codex before using it. Balance HUD posts one private
+  status to the inbox with a link to the requesting conversation. The hook
+  returns no decision and never supplies input to Codex. It covers requests
+  delivered by `PermissionRequest`; other prompts still use their own event
+  sources.
+
+  ```json
+  {"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"'/path/to/balance-hud' -completed codex -hook","timeout":5}]}]}}
   ```
 
 - **[Antigravity](https://antigravity.google/docs/hooks):** add the named entry to the client's global `~/.gemini/config/hooks.json`, or the corresponding config in each separate client home. The hook ignores an early stop while background tasks are still running. An authorized quota account alone does not produce task notifications; install the hook in each actual client profile you use.

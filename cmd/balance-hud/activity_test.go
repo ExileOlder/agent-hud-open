@@ -32,7 +32,7 @@ func TestHookTracksOverlappingSessionsAndWaits(t *testing.T) {
 	var work workingMarks
 	var inbox mailInbox
 	send := func(agent int, phase hookPhase, session uint32) {
-		work.hook(hookEvent{agent, phase, session}, &inbox, now, false)
+		work.hook(hookEvent{agent: agent, phase: phase, session: session}, &inbox, now, false)
 	}
 	send(5, hookWork, 12)
 	send(5, hookWork, 24)
@@ -60,7 +60,7 @@ func TestNativeToolPoseTransitions(t *testing.T) {
 	p := placement{ShowClaude: true}
 	var w workingMarks
 	var inbox mailInbox
-	w.hook(hookEvent{5, hookCommand, 1}, &inbox, now, false)
+	w.hook(hookEvent{agent: 5, phase: hookCommand, session: 1}, &inbox, now, false)
 	frame := func(at time.Duration) int {
 		f, _ := w.frames(rows, now.Add(at), now, now, -1, p)
 		return f[4]
@@ -74,7 +74,7 @@ func TestNativeToolPoseTransitions(t *testing.T) {
 	if got := frame(22 * time.Second); got != toolBase+3*toolFrames {
 		t.Fatalf("long command pose: %v", got)
 	}
-	w.hook(hookEvent{5, hookComplete, 1}, &inbox, now.Add(23*time.Second), false)
+	w.hook(hookEvent{agent: 5, phase: hookComplete, session: 1}, &inbox, now.Add(23*time.Second), false)
 	if got := frame(23 * time.Second); got >= workBase {
 		t.Fatalf("finishing stops the working pose: %v", got)
 	}
