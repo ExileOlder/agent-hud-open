@@ -1,6 +1,7 @@
 """Smoke-test the actual console launcher without contacting an account."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -8,7 +9,16 @@ import tempfile
 
 launcher = Path(sys.argv[1]).resolve()
 with tempfile.TemporaryDirectory() as directory:
-    env = dict(os.environ, AGY_AUTH_HOME=directory)
+    if os.name == "nt":
+        # The console entry point locates BalanceHUD.exe beside itself;
+        # exercise the actual launcher from a portable folder with spaces.
+        unpacked = Path(directory) / "Balance HUD with spaces"
+        unpacked.mkdir()
+        shutil.copyfile(launcher.with_name("BalanceHUD.exe"), unpacked / "BalanceHUD.exe")
+        launcher = Path(shutil.copyfile(launcher, unpacked / launcher.name))
+    accounts = Path(directory) / "accounts"
+    accounts.mkdir()
+    env = dict(os.environ, AGY_AUTH_HOME=str(accounts))
     version = subprocess.run([launcher, "--json", "version"], env=env,
                              check=True, capture_output=True, timeout=10)
     assert json.loads(version.stdout)["data"]["version"]

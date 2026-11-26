@@ -63,8 +63,13 @@ CGO_ENABLED="$cgo" go build -mod=mod -modfile="$native_tmp/bundle.mod" \
   -overlay="$native_tmp/overlay.json" -trimpath -ldflags="$linker" \
   -o "$stage/$binary" ./cmd/balance-hud
 if [[ "$os" == windows ]]; then
-  CGO_ENABLED=0 go build -mod=readonly -trimpath -ldflags="-s -w" \
-    -o "$stage/$helper" ./cmd/agy-auth-monitor
+  source="$root/cmd/agy-auth-monitor/native/launcher.c"
+  if [[ "$(go env GOHOSTOS)" == windows ]]; then
+    "$python" scripts/build-windows-monitor.py "$source" "$stage/$helper"
+  else
+    "${WINDOWS_MONITOR_CC:-x86_64-w64-mingw32-gcc}" -Os -ffreestanding -fno-stack-protector \
+      -nostdlib -Wl,--subsystem,console,-e,balance_monitor_entry -s "$source" -lkernel32 -o "$stage/$helper"
+  fi
 else
   cat > "$stage/$helper" <<'SHHELPER'
 #!/bin/sh

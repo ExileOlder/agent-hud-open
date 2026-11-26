@@ -15,7 +15,7 @@ Use Go 1.24 or later.
 - **Ubuntu/X11**: install the C compiler, pkg-config, libx11-dev, libxrandr-dev, libxext-dev, libxft-dev and libsqlite3-dev. Run `CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o build/balance-hud ./cmd/balance-hud`.
 - **Windows x64**: run `go build -trimpath -ldflags="-s -w -H windowsgui" -o build/balance-hud.exe ./cmd/balance-hud` on Windows, or set `GOOS=windows GOARCH=amd64 CGO_ENABLED=0` to cross-compile from Linux. This build requires native testing on Windows.
 - Run `go test ./...` to test quota decoding and display projection. Tests use fictional accounts.
-- Run `bash scripts/package.sh` to build the portable archive, including the Antigravity helper. On Ubuntu, set `BALANCE_HUD_LINUX_ARCHIVE=xz` to match CI; leave it unset for the gzip format. This requires Git and Python in addition to the build dependencies above.
+- Run `bash scripts/package.sh` to build the portable archive, including the Antigravity helper. On Ubuntu, set `BALANCE_HUD_LINUX_ARCHIVE=xz` to match CI; leave it unset for the gzip format. This requires Git and Python in addition to the build dependencies above. Windows portable packaging uses Visual Studio C++ Build Tools and the Windows SDK; cross-packaging from Linux uses an x64 MinGW compiler (`WINDOWS_MONITOR_CC` can override its command).
 
 ## Connect quota sources
 
