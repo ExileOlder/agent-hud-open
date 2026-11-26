@@ -24,10 +24,10 @@ struct Hud {
     Pixmap bitmap;
     int bw, bh;
     int tip_x, tip_y, tip_w, tip_h, settings, motion;
-    long long leave_at;
+    long long leave_at, down_at;
     unsigned long bg, fg, track;
     int sx, sy, sw, sh, x, y, w, height;
-    int edge, numbers, hover, pressed, moved, down_x, down_y;
+    int edge, numbers, hover, pressed, moved, outlined, down_x, down_y, grab_x, grab_y;
     double offset;
     PeekCell cells[slots][max_cells];
     int counts[slots];
@@ -58,6 +58,19 @@ static void box(Hud *h, int x,int y,unsigned w,unsigned height,unsigned long col
     XSetForeground(h->d,h->gc,color);
     XFillRectangle(h->d,h->tip,h->gc,x,y,w,height);
 }
+// Paint the gear directly; Xft has no fallback for missing symbol glyphs.
+static void paint_gear(Hud *h,int x,int y) {
+    XPoint teeth[32];
+    for(int i=0;i<32;i++){
+        double angle=(i+.5)*2*M_PI/32;
+        double radius=(i%4==1||i%4==2)?10:7;
+        teeth[i]=(XPoint){x+(short)lround(radius*cos(angle)),y+(short)lround(radius*sin(angle))};
+    }
+    XSetForeground(h->d,h->gc,h->fg);
+    XFillPolygon(h->d,h->tip,h->gc,teeth,32,Nonconvex,CoordModeOrigin);
+    XSetForeground(h->d,h->gc,h->bg);
+    XFillArc(h->d,h->tip,h->gc,x-4,y-4,8,8,0,360*64);
+}
 static void shape(Hud *h,Window w,int width,int height,int r){
     if(!XShapeQueryExtension(h->d,&(int){0},&(int){0}))return;
     XRectangle rects[512];
@@ -79,6 +92,24 @@ static void shape(Hud *h,Window w,int width,int height,int r){
 static void draw(Hud *h) {
     if(h->bitmap&&h->bw==h->w&&h->bh==h->height)
         XCopyArea(h->d,h->bitmap,h->bar,h->gc,0,0,h->w,h->height,0,0);
+    if(!h->outlined)return;
+    // Match the original HUD's rounded white 4:3 dashed outline.
+    XPoint path[37];
+    int n=0,r=(h->w<h->height?h->w:h->height)/2-2;
+    int xs[]={h->w-r-2,h->w-r-2,r+2,r+2};
+    int ys[]={r+2,h->height-r-2,h->height-r-2,r+2};
+    for(int corner=0;corner<4;corner++){
+        for(int i=0;i<=8;i++){
+            double a=(-M_PI/2)+(corner+i/8.0)*M_PI/2;
+            path[n++]=(XPoint){xs[corner]+lround(r*cos(a)),ys[corner]+lround(r*sin(a))};
+        }
+    }
+    path[n++]=path[0];
+    XSetForeground(h->d,h->gc,h->fg);
+    XSetLineAttributes(h->d,h->gc,1,LineOnOffDash,CapButt,JoinRound);
+    XSetDashes(h->d,h->gc,0,(char[]){4,3},2);
+    XDrawLines(h->d,h->bar,h->gc,path,n,CoordModeOrigin);
+    XSetLineAttributes(h->d,h->gc,0,LineSolid,CapButt,JoinMiter);
 }
 void hud_bitmap(Hud *h,int w,int height,const unsigned char *pixels){
     if(w!=h->w||height!=h->height)return;
@@ -168,7 +199,7 @@ static void draw_tip(Hud *h) {
             tx+=text_width(h,h->heading,c->value)+peek_spacing;
         }
         XftDrawSetClip(h->tip_draw,NULL);
-        label(h,width-gear+5,baseline,"⚙",h->heading,&h->text_color);
+        paint_gear(h,width-gear/2-3,height/2);
     }
 }
 static void pick(Hud *h, int x, int y) {
@@ -178,12 +209,22 @@ static void pick(Hud *h, int x, int y) {
     if(h->settings)return;
     if(i!=h->hover){h->hover=i;draw_tip(h);}
 }
+static void drag(Hud *h,int x,int y) {
+    h->moved=1;h->outlined=1;
+    XMoveWindow(h->d,h->bar,h->grab_x+x-h->down_x,h->grab_y+y-h->down_y);
+    draw(h);
+}
 static void drop(Hud *h, int x, int y) {
-    x = clamp(x,h->sx,h->sx+h->sw-1)-h->sx;
-    y = clamp(y,h->sy,h->sy+h->sh-1)-h->sy;
+    int center_x=h->grab_x+x-h->down_x+h->w/2-h->sx;
+    int center_y=h->grab_y+y-h->down_y+h->height/2-h->sy;
+    x=clamp(x,h->sx,h->sx+h->sw-1)-h->sx;
+    y=clamp(y,h->sy,h->sy+h->sh-1)-h->sy;
     int distances[] = {y, h->sw-1-x, h->sh-1-y, x};
-    for (int i=0;i<4;i++) if (distances[i]<distances[h->edge]) h->edge=i;
-    h->offset = vertical(h) ? (double)y/(h->sh-1) : (double)x/(h->sw-1);
+    for(int i=0;i<4;i++)if(distances[i]<distances[h->edge])h->edge=i;
+    int run=vertical(h)?2*pad+slots*item:2*pad+slots*step(h);
+    int travel=vertical(h)?h->sh-run:h->sw-run;
+    int offset=(vertical(h)?center_y:center_x)-run/2;
+    h->offset=travel>0?(double)clamp(offset,0,travel)/travel:.5;
     place(h);
 }
 
@@ -279,8 +320,8 @@ int hud_step(Hud *h,int timeout) {
         case EnterNotify:h->leave_at=0;break;
         case MotionNotify:
             if(h->pressed){
-                if(abs(e.xmotion.x_root-h->down_x)+abs(e.xmotion.y_root-h->down_y)>=6)
-                    h->moved=1;
+                if(h->outlined||hypot(e.xmotion.x_root-h->down_x,e.xmotion.y_root-h->down_y)>=6)
+                    drag(h,e.xmotion.x_root,e.xmotion.y_root);
             }else if(e.xmotion.window==h->bar)pick(h,e.xmotion.x,e.xmotion.y);
             break;
         case ButtonPress:
@@ -307,6 +348,7 @@ int hud_step(Hud *h,int timeout) {
                 hide_tip(h);
                 h->pressed=1;h->moved=0;
                 h->down_x=e.xbutton.x_root;h->down_y=e.xbutton.y_root;
+                h->grab_x=h->x;h->grab_y=h->y;h->down_at=millis();
             }else if(e.xbutton.button==Button3){
                 if(e.xbutton.state&ShiftMask)return 1;
                 hide_tip(h);h->numbers=!h->numbers;place(h);XFlush(h->d);return 2;
@@ -314,15 +356,18 @@ int hud_step(Hud *h,int timeout) {
             break;
         case ButtonRelease:
             if(e.xbutton.button==Button1&&h->pressed){
-                h->pressed=0;
+                h->pressed=0;h->outlined=0;
                 if(h->moved){
                     drop(h,e.xbutton.x_root,e.xbutton.y_root);
                     XFlush(h->d);return 2;
                 }
-                pick(h,e.xbutton.x,e.xbutton.y);
+                draw(h);pick(h,e.xbutton.x,e.xbutton.y);
             }
             break;
         }
+    }
+    if(h->pressed&&!h->outlined&&millis()-h->down_at>=300){
+        h->outlined=1;draw(h);
     }
     if(h->leave_at && millis()>=h->leave_at)hide_tip(h);
     XFlush(h->d);

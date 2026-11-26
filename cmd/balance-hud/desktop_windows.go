@@ -74,6 +74,26 @@ func utf16(s string) *uint16 {
 func bound(n, lo, hi int32) int32 { return max(lo, min(n, hi)) }
 func mouse(lp uintptr) point      { return point{int32(int16(lp)), int32(int16(lp >> 16))} }
 
+// Paint the gear directly so its shape does not depend on the selected font.
+func paintGear(dc uintptr, x, y int32, background uintptr) {
+	var teeth [32]point
+	for i := range teeth {
+		angle := (float64(i) + .5) * 2 * math.Pi / float64(len(teeth))
+		radius := 7.0
+		if i%4 == 1 || i%4 == 2 {
+			radius = 10
+		}
+		teeth[i] = point{x + int32(math.Round(radius*math.Cos(angle))), y + int32(math.Round(radius*math.Sin(angle)))}
+	}
+	pen := g("SelectObject", dc, g("GetStockObject", 8))   // NULL_PEN
+	brush := g("SelectObject", dc, g("GetStockObject", 0)) // WHITE_BRUSH
+	g("Polygon", dc, uintptr(unsafe.Pointer(&teeth[0])), uintptr(len(teeth)))
+	g("SelectObject", dc, background)
+	g("Ellipse", dc, uintptr(x-4), uintptr(y-4), uintptr(x+4), uintptr(y+4))
+	g("SelectObject", dc, brush)
+	g("SelectObject", dc, pen)
+}
+
 func runDesktop(fetch func() []result) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -85,8 +105,10 @@ func runDesktop(fetch func() []result) error {
 	var noticeUntil time.Time
 	var area, frame rect
 	var hover = -1
-	var pressing, moved bool
+	var pressing, moved, outlined bool
 	var initial point
+	var dragOrigin rect
+	var downAt time.Time
 	ready := make(chan []result, 1)
 	busy := false
 	next := time.Time{}
@@ -129,8 +151,10 @@ func runDesktop(fetch func() []result) error {
 	labelFont, valueFont := font(400), font(600)
 	defer g("DeleteObject", labelFont)
 	defer g("DeleteObject", valueFont)
-	hoverStart := time.Now()
+	started := time.Now()
+	hoverStart := started
 	var motionAnimating bool
+	var previousFrames markFrames
 
 	invalidate := func(w uintptr) { u("InvalidateRect", w, 0, 0) }
 	place := func() {
@@ -164,7 +188,7 @@ func runDesktop(fetch func() []result) error {
 			hoverStart = time.Now()
 			if !p.ReduceMotion {
 				motionAnimating = true
-				u("SetTimer", bar, 1, 40, 0)
+				u("SetTimer", bar, 1, 32, 0)
 				invalidate(bar)
 			}
 		}
@@ -290,15 +314,13 @@ func runDesktop(fetch func() []result) error {
 					x += measure(dc, cell.Value) + peekSpacing
 				}
 				g("SelectClipRgn", dc, 0)
-				write(dc, r.Right-gear+5, y, "⚙", 0xf6f4f2)
+				paintGear(dc, r.Right-gear/2-3, r.Bottom/2, bg)
 			}
 			return
 		}
-		phase := 0.0
-		if hover >= 0 && !p.ReduceMotion {
-			phase = clamp01(time.Since(hoverStart).Seconds() / hoverSeconds)
-		}
-		barImage = paintBar(rows, p, hover, phase, barImage)
+		now := time.Now()
+		frames, _ := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion)
+		barImage = paintBar(rows, p, frames, barImage)
 		w, h := barImage.Bounds().Dx(), barImage.Bounds().Dy()
 		info := struct {
 			Size                   uint32
@@ -310,6 +332,15 @@ func runDesktop(fetch func() []result) error {
 		}{Size: 40, Width: int32(w), Height: -int32(h), Planes: 1, Bits: 32}
 		g("StretchDIBits", dc, 0, 0, uintptr(w), uintptr(h), 0, 0, uintptr(w), uintptr(h),
 			uintptr(unsafe.Pointer(&barImage.Pix[0])), uintptr(unsafe.Pointer(&info)), 0, 0x00cc0020)
+		if outlined {
+			pen := g("CreatePen", 1, 1, 0xf6f4f2) // PS_DASH
+			oldPen := g("SelectObject", dc, pen)
+			oldBrush := g("SelectObject", dc, g("GetStockObject", 5)) // NULL_BRUSH
+			g("RoundRect", dc, 2, 2, uintptr(w-1), uintptr(h-1), 92, 92)
+			g("SelectObject", dc, oldBrush)
+			g("SelectObject", dc, oldPen)
+			g("DeleteObject", pen)
+		}
 	}
 	save := func() {
 		if e := p.save(); e != nil {
@@ -331,26 +362,46 @@ func runDesktop(fetch func() []result) error {
 			details(i)
 		}
 	}
-	drop := func() {
-		var cur point
-		if u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) == 0 {
-			return
-		}
+	drag := func(cur point) {
+		moved, outlined = true, true
+		x := dragOrigin.Left + cur.X - initial.X
+		y := dragOrigin.Top + cur.Y - initial.Y
+		u("SetWindowPos", bar, 0, uintptr(x), uintptr(y), 0, 0, 0x1|0x4|0x10)
+		invalidate(bar)
+	}
+	drop := func(cur point) {
 		x, y := bound(cur.X, area.Left, area.Right-1), bound(cur.Y, area.Top, area.Bottom-1)
 		d := []int32{y - area.Top, area.Right - 1 - x, area.Bottom - 1 - y, x - area.Left}
-		for i, v := range d {
-			if v < d[p.Edge] {
+		for i := range d {
+			if d[i] < d[p.Edge] {
 				p.Edge = i
 			}
 		}
+		w, h, _ := dimensions()
+		centerX := (dragOrigin.Left+dragOrigin.Right)/2 + cur.X - initial.X - area.Left
+		centerY := (dragOrigin.Top+dragOrigin.Bottom)/2 + cur.Y - initial.Y - area.Top
+		position, travel := centerX-w/2, area.Right-area.Left-w
 		if p.Edge%2 != 0 {
-			p.Offset = float64(y-area.Top) / float64(max(1, area.Bottom-area.Top-1))
-		} else {
-			p.Offset = float64(x-area.Left) / float64(max(1, area.Right-area.Left-1))
+			position, travel = centerY-h/2, area.Bottom-area.Top-h
 		}
+		p.Offset = .5
+		if travel > 0 {
+			p.Offset = float64(bound(position, 0, travel)) / float64(travel)
+		}
+		hide()
 		place()
 		save()
 	}
+	finishDrag := func() {
+		pressing, outlined = false, false
+		u("ReleaseCapture")
+		var cur point
+		if moved && u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 {
+			drop(cur)
+		}
+		invalidate(bar)
+	}
+
 	showNotice := func() {
 		if notice == 0 || len(messages) == 0 {
 			return
@@ -440,32 +491,36 @@ func runDesktop(fetch func() []result) error {
 					hide()
 					invalidate(bar)
 				}
-				if motionAnimating {
+				now := time.Now()
+				frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion)
+				if previousFrames != frames {
+					previousFrames = frames
 					invalidate(bar)
-					if hover < 0 || p.ReduceMotion || time.Since(hoverStart).Seconds() >= hoverSeconds {
-						motionAnimating = false
-						u("SetTimer", bar, 1, 200, 0)
+				}
+				active = active || pressing
+				if motionAnimating != active {
+					motionAnimating = active
+					interval := uintptr(200)
+					if active {
+						interval = 32
 					}
+					u("SetTimer", bar, 1, interval, 0)
 				}
 				if noticeID != 0 && time.Now().After(noticeUntil) {
 					noticeID = 0
 					u("ShowWindow", notice, 0)
 					showNotice()
 				}
-				// Our non-activating window may not get button-up outside it.
 				if pressing {
 					key := uintptr(1)
 					if u("GetSystemMetrics", 23) != 0 {
 						key = 2
 					}
 					if u("GetAsyncKeyState", key)&0x8000 == 0 {
-						pressing = false
-						u("ReleaseCapture")
-						var cur point
-						if u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 &&
-							(moved || math.Abs(float64(cur.X-initial.X))+math.Abs(float64(cur.Y-initial.Y)) >= 6) {
-							drop()
-						}
+						finishDrag()
+					} else if !outlined && time.Since(downAt) >= 300*time.Millisecond {
+						outlined = true
+						invalidate(bar)
 					}
 				}
 				select {
@@ -488,8 +543,8 @@ func runDesktop(fetch func() []result) error {
 				hideAt = time.Time{}
 				if pressing {
 					var cur point
-					if u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 && math.Abs(float64(cur.X-initial.X))+math.Abs(float64(cur.Y-initial.Y)) >= 6 {
-						moved = true
+					if u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 && (outlined || math.Hypot(float64(cur.X-initial.X), float64(cur.Y-initial.Y)) >= 6) {
+						drag(cur)
 					}
 				} else {
 					event := track{Flags: 2, Window: bar}
@@ -506,7 +561,8 @@ func runDesktop(fetch func() []result) error {
 			case 0x201:
 				hide()
 				pressing = u("GetCursorPos", uintptr(unsafe.Pointer(&initial))) != 0
-				moved = false
+				moved, outlined = false, false
+				dragOrigin, downAt = frame, time.Now()
 				if pressing {
 					u("SetCapture", bar)
 				}
@@ -515,13 +571,10 @@ func runDesktop(fetch func() []result) error {
 				if !pressing {
 					return 0
 				}
-				pressing = false
-				u("ReleaseCapture")
+				finishDrag()
 				if !moved {
 					pick(mouse(lp))
-					return 0
 				}
-				drop()
 				return 0
 			case 0x205:
 				if wp&4 != 0 {

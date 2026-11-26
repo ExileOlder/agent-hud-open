@@ -8,6 +8,7 @@ import (
 	"image/draw"
 	"image/png"
 	"math"
+	"sync"
 
 	imagedraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
@@ -19,6 +20,9 @@ import (
 //go:embed artwork/hover.png
 var hoverPNG []byte
 
+//go:embed artwork/idle.png
+var idlePNG []byte
+
 const (
 	barPadding     = 4
 	barItem        = 92
@@ -26,18 +30,23 @@ const (
 	hoverFrames    = 40
 	hoverCell      = 80
 	hoverColumns   = 8
-	hoverSeconds   = float64(hoverFrames) / 25
 )
 
 var hoverAtlas image.Image
 var barFont font.Face
 
-func init() {
-	var err error
-	hoverAtlas, err = png.Decode(bytes.NewReader(hoverPNG))
+var idleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(idlePNG) })
+
+func decodeAtlas(data []byte) image.Image {
+	img, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		panic(err)
 	}
+	return img
+}
+
+func init() {
+	hoverAtlas = decodeAtlas(hoverPNG)
 	parsed, e := opentype.Parse(goregular.TTF)
 	if e != nil {
 		panic(e)
@@ -65,7 +74,7 @@ func barGeometry(p placement) (w, h, step int) {
 
 // Native display draw calls consume an opaque BGRA image; window shapes
 // clip the pill's corners. Rings are drawn with fractional pixel coverage.
-func paintBar(rows []row, p placement, hover int, phase float64, dst *image.RGBA) *image.RGBA {
+func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *image.RGBA {
 	w, h, step := barGeometry(p)
 	if dst == nil || dst.Bounds().Dx() != w || dst.Bounds().Dy() != h {
 		dst = image.NewRGBA(image.Rect(0, 0, w, h))
@@ -92,60 +101,35 @@ func paintBar(rows []row, p placement, hover int, phase float64, dst *image.RGBA
 		}
 
 		const radius, halfStroke = 28.5, 3.3
-		parts := 1
-		if i == 1 || i == 2 {
-			parts = 4
-		}
-		span := 2 * math.Pi / float64(parts)
 		for yy := cy - 33; yy <= cy+33; yy++ {
 			for xx := cx - 33; xx <= cx+33; xx++ {
 				dx, dy := float64(xx-cx)+.5, float64(yy-cy)+.5
 				rad := math.Hypot(dx, dy)
-				if math.Abs(rad-radius) >= halfStroke+.5 {
+				d := math.Abs(rad - radius)
+				track := clamp01(halfStroke + .5 - d)
+				if track == 0 {
 					continue
 				}
-				angle := math.Atan2(dx, -dy)
-				if angle < 0 {
-					angle += 2 * math.Pi
-				}
-				part := min(parts-1, int(angle/span))
-				off := angle - float64(part)*span
-				gap, percent := 0.0, r.Percent
-				if parts > 1 {
-					gap = .17
-					percent = -1
-					if part < len(r.Segments) {
-						percent = r.Segments[part]
-					}
-				}
-				coverage := func(delta float64) float64 {
-					d := math.Abs(rad - radius)
+				px := blend(dst.RGBAAt(xx, yy), color.RGBA{30, 32, 33, 255}, track)
+				if r.Percent > 0 {
+					delta := ringGap(math.Atan2(dx, -dy), r.Percent)
 					if delta > 0 {
 						d = math.Sqrt(d*d + 2*rad*radius*(1-math.Cos(delta)))
 					}
-					return clamp01(halfStroke + .5 - d)
-				}
-				px := blend(dst.RGBAAt(xx, yy), color.RGBA{30, 32, 33, 255}, coverage(max(gap-off, off-(span-gap))))
-				if percent > 0 {
-					fill := gap + float64(percent)*(span-2*gap)/100
-					delta := max(gap-off, off-fill)
-					if parts == 1 {
-						delta = min(delta, 2*math.Pi-off, off+2*math.Pi-fill)
-					}
-					px = blend(px, q, coverage(delta))
+					px = blend(px, q, clamp01(halfStroke+.5-d))
 				}
 				dst.SetRGBA(xx, yy, px)
 			}
 		}
 		slot := [...]int{0, 1, 1, 2}[i]
-		frame := 0
-		if hover == i && !p.ReduceMotion {
-			frame = min(hoverFrames-1, int(phase*hoverFrames))
+		frame, count, atlas := frames[i], hoverFrames, hoverAtlas
+		if frame < 0 {
+			frame, count, atlas = -frame-1, idleFrames, idleAtlas()
 		}
 		x := frame % hoverColumns * hoverCell
-		y := (slot*hoverFrames/hoverColumns + frame/hoverColumns) * hoverCell
+		y := (slot*count/hoverColumns + frame/hoverColumns) * hoverCell
 		imagedraw.CatmullRom.Scale(dst, image.Rect(cx-29, cy-29, cx+29, cy+29),
-			hoverAtlas, image.Rect(x, y, x+hoverCell, y+hoverCell), draw.Over, nil)
+			atlas, image.Rect(x, y, x+hoverCell, y+hoverCell), draw.Over, nil)
 		if p.Numbers {
 			ink := q
 			if r.Percent < 0 {
@@ -160,6 +144,16 @@ func paintBar(rows []row, p placement, hover int, phase float64, dst *image.RGBA
 		dst.Pix[i], dst.Pix[i+2] = dst.Pix[i+2], dst.Pix[i]
 	}
 	return dst
+}
+
+// Remaining quota fills clockwise from twelve o'clock. As it drops the
+// rounded end retreats counterclockwise, opening a gap from the upper-left.
+func ringGap(angle float64, percent int) float64 {
+	if angle < 0 {
+		angle += 2 * math.Pi
+	}
+	end := 2 * math.Pi * float64(percent) / 100
+	return max(0, min(angle-end, 2*math.Pi-angle))
 }
 func clamp01(a float64) float64 { return max(0, min(1, a)) }
 func blend(a, b color.RGBA, amount float64) color.RGBA {

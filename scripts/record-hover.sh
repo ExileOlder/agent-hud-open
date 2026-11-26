@@ -16,9 +16,12 @@ PY
 )
 "${ESBUILD:-esbuild}" "$tmp/record-hover.ts" --bundle "--define:MARKS=$marks" "--outfile=$tmp/hover.js"
 printf '<!doctype html><body><script src="hover.js"></script>\n' > "$tmp/hover.html"
-"${BROWSER:-chromium}" --headless=new --disable-gpu --no-first-run --user-data-dir="$tmp/profile" \
-  --virtual-time-budget=6000 --dump-dom "file://$tmp/hover.html" > "$tmp/dom.html"
-python3 - "$tmp/dom.html" "$assets/hover.png" <<'PY'
+for mode in hover idle; do
+  query=""
+  if [[ "$mode" == idle ]]; then query="?idle"; fi
+  "${BROWSER:-chromium}" --headless=new --disable-gpu --no-first-run --user-data-dir="$tmp/profile" \
+    --virtual-time-budget=30000 --dump-dom "file://$tmp/hover.html$query" > "$tmp/dom.html"
+  python3 - "$tmp/dom.html" "$assets/$mode.png" <<'PY'
 import base64, pathlib, re, sys
 page = pathlib.Path(sys.argv[1]).read_text()
 match = re.search(r'<body>data:image/png;base64,([A-Za-z0-9+/=]+)</body>', page)
@@ -26,3 +29,4 @@ if not match:
     sys.exit(page[:1000])
 pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(match[1], validate=True))
 PY
+done

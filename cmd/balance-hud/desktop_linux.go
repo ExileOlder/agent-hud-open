@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"math"
 	"os"
 	"runtime"
 	"time"
@@ -53,12 +52,13 @@ func runDesktop(fetch func() []result) error {
 	rows := view(nil)
 	set(rows)
 	var frame *image.RGBA
-	lastHover := -2
-	phase := 0.0
-	dirty := true
-	last := time.Now()
-	paint := func(hover int) {
-		frame = paintBar(rows, p, hover, phase, frame)
+	started := time.Now()
+	hoverStart := started
+	lastHover := -1
+	var previousFrames markFrames
+	animating, dirty := false, true
+	paint := func(frames markFrames) {
+		frame = paintBar(rows, p, frames, frame)
 		C.hud_bitmap(h, C.int(frame.Bounds().Dx()), C.int(frame.Bounds().Dy()), (*C.uchar)(unsafe.Pointer(&frame.Pix[0])))
 	}
 	ready := make(chan []result, 1)
@@ -74,8 +74,8 @@ func runDesktop(fetch func() []result) error {
 	defer timer.Stop()
 	for {
 		timeout := 200
-		if !p.ReduceMotion && lastHover >= 0 && phase < 1 {
-			timeout = 40
+		if animating {
+			timeout = 32
 		}
 		switch C.hud_step(h, C.int(timeout)) {
 		case 1:
@@ -99,22 +99,15 @@ func runDesktop(fetch func() []result) error {
 			refresh()
 		default:
 		}
-		now := time.Now()
-		hover := int(C.hud_hover(h))
+		now, hover := time.Now(), int(C.hud_hover(h))
 		if hover != lastHover {
-			phase = 0
-			dirty = true
-		} else if hover >= 0 && phase < 1 && !p.ReduceMotion {
-			phase = math.Min(1, phase+now.Sub(last).Seconds()/hoverSeconds)
-			dirty = true
+			hoverStart, lastHover = now, hover
 		}
-		if p.ReduceMotion {
-			phase = 0
-		}
-		lastHover, last = hover, now
-		if dirty {
-			paint(hover)
-			dirty = false
+		frames, active := motionFrames(now.Sub(started), hover, now.Sub(hoverStart), p.ReduceMotion)
+		animating = active
+		if dirty || frames != previousFrames {
+			paint(frames)
+			previousFrames, dirty = frames, false
 		}
 	}
 }
