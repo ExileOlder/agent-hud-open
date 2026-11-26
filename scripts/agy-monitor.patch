@@ -1,5 +1,28 @@
+diff --git a/cmd/agy-auth-monitor/main.go b/cmd/agy-auth-monitor/main.go
+new file mode 100644
+index 0000000..8e1f88a
+--- /dev/null
++++ b/cmd/agy-auth-monitor/main.go
+@@ -0,0 +1,17 @@
++package main
++
++import (
++	"fmt"
++	"os"
++
++	"github.com/fikrilal/agy-auth/internal/cli"
++)
++
++func main() {
++	app, err := cli.NewMonitor()
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "agy-auth-monitor: %v\n", err)
++		os.Exit(1)
++	}
++	os.Exit(app.RunMonitor(os.Args[1:]))
++}
 diff --git a/internal/cli/cmd_login.go b/internal/cli/cmd_login.go
-index 7c53872..73f6539 100644
+index 7c53872..0651cf0 100644
 --- a/internal/cli/cmd_login.go
 +++ b/internal/cli/cmd_login.go
 @@ -25,6 +25,7 @@ func (a *App) cmdLogin(args []string) int {
@@ -20,7 +43,7 @@ index 7c53872..73f6539 100644
  	if *viaAgy {
  		return a.loginViaAgy(*alias, *agyPath, isGCP, projectID, regionValue, deskOpts)
  	}
-@@ -103,10 +107,10 @@ func (a *App) cmdLogin(args []string) int {
+@@ -103,17 +107,67 @@ func (a *App) cmdLogin(args []string) int {
  		}
  		return a.failCode("oauth_error", hint, "could not discover the Antigravity OAuth client")
  	}
@@ -30,13 +53,10 @@ index 7c53872..73f6539 100644
  
 -func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser bool, deskOpts switchOptions) int {
 +func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser, monitorOnly bool, deskOpts switchOptions) int {
- 	state, err := oauth.NewState()
- 	if err != nil {
- 		return a.failCode("oauth_error", "Retry the login flow.", "could not start the OAuth flow")
-@@ -165,6 +169,14 @@ func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser
- 	if err != nil {
- 		return a.failCode("oauth_error", "Try signing in again.", "could not prepare the credential document")
- 	}
++	raw, warnings, code := a.requestOAuth(authMethod, projectID, region, noBrowser)
++	if code != 0 {
++		return code
++	}
 +	if monitorOnly {
 +		result, err := a.Store.Upsert(raw, alias, false)
 +		if err != nil {
@@ -45,9 +65,414 @@ index 7c53872..73f6539 100644
 +		fmt.Fprintf(a.Out, "Monitoring account saved: %s\n", result.Account.DisplayName())
 +		return 0
 +	}
- 	a.saveLiveAccount()
- 	prevKeeper := a.currentDesktopKeeperHint()
- 	claimLive := a.retainLiveInstallationID()
++	a.saveLiveAccount()
++	prevKeeper := a.currentDesktopKeeperHint()
++	claimLive := a.retainLiveInstallationID()
++	result, err := a.Store.Upsert(raw, alias, true)
++	if err != nil {
++		return a.registryFailure(err, "could not save the logged-in account")
++	}
++	report := a.Storage.Write(raw)
++	if !report.OK() {
++		if errors.Is(report.Error(), agy.ErrBackup) {
++			return a.failCode("backup_error", fmt.Sprintf("The account is saved; fix backup permissions and run `agy-auth switch %s`.", result.Account.ID), "could not back up the current agy credential")
++		}
++		return a.errorDoc(1, ErrorDoc{
++			Code:    "state_uncertain",
++			Message: "the account was saved, but the agy credential could not be written",
++			Hint:    fmt.Sprintf("Run `agy-auth switch %s` after fixing credential storage.", result.Account.ID),
++		})
++	}
++	if err := a.Storage.SyncSettings(authMethod, projectID, region); err != nil {
++		warnings = append(warnings, fmt.Sprintf("settings: %v", err))
++	}
++	if err := report.Error(); err != nil {
++		warnings = append(warnings, err.Error())
++	}
++	if result.Account.Email == "" {
++		warnings = append(warnings, "the ID token did not include an email address")
++	}
++	if err := a.ensureLiveInstallationID(result.Account.ID, claimLive); err != nil {
++		warnings = append(warnings, fmt.Sprintf("could not set the installation id: %v", err))
++	}
++	isGCP := strings.EqualFold(strings.TrimSpace(authMethod), agy.AuthMethodGCP) || strings.TrimSpace(projectID) != ""
++	deskRes, _ := a.syncDesktopForAccount(&result.Account, raw, isGCP, deskOpts, prevKeeper)
++	warnings = append(warnings, deskRes.Warnings...)
++	return a.finishLoginWithDesktop(result, report, deskRes, warnings)
++}
++
++// requestOAuth authorizes an account without writing the live Antigravity state.
++func (a *App) requestOAuth(authMethod, projectID, region string, noBrowser bool) ([]byte, []string, int) {
+ 	state, err := oauth.NewState()
+ 	if err != nil {
+-		return a.failCode("oauth_error", "Retry the login flow.", "could not start the OAuth flow")
++		return nil, nil, a.failCode("oauth_error", "Retry the login flow.", "could not start the OAuth flow")
+ 	}
+ 	verifier, err := oauth.NewVerifier()
+ 	if err != nil {
+-		return a.failCode("oauth_error", "Retry the login flow.", "could not start the OAuth flow")
++		return nil, nil, a.failCode("oauth_error", "Retry the login flow.", "could not start the OAuth flow")
+ 	}
+ 	authURL := oauth.AuthURLForMethod(state, verifier, authMethod)
+ 
+@@ -130,21 +184,21 @@ func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser
+ 	fmt.Fprintln(prompt, "After approving, antigravity.google/oauth-callback shows an authorization code.")
+ 	input, err := a.readLine("Paste the authorization code shown on that page: ")
+ 	if err != nil {
+-		return a.failCode("input_error", "Try again with the code from antigravity.google/oauth-callback.", "could not read the authorization code")
++		return nil, nil, a.failCode("input_error", "Try again with the code from antigravity.google/oauth-callback.", "could not read the authorization code")
+ 	}
+ 	code, err := oauth.NormalizeCode(input, state)
+ 	if err != nil {
+-		return a.failCode("oauth_error", "Copy the code shown after approving access and try again.", "the authorization code is invalid")
++		return nil, nil, a.failCode("oauth_error", "Copy the code shown after approving access and try again.", "the authorization code is invalid")
+ 	}
+ 
+ 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+ 	defer cancel()
+ 	response, err := oauth.ExchangeForMethod(ctx, code, verifier, authMethod)
+ 	if err != nil {
+-		return a.failCode("oauth_error", "Check your network connection and try again.", "could not exchange the authorization code")
++		return nil, nil, a.failCode("oauth_error", "Check your network connection and try again.", "could not exchange the authorization code")
+ 	}
+ 	if response.IDToken == "" {
+-		return a.failCode("oauth_error", "Try signing in again; the account cannot be identified without an ID token.", "Google did not return an id_token")
++		return nil, nil, a.failCode("oauth_error", "Try signing in again; the account cannot be identified without an ID token.", "Google did not return an id_token")
+ 	}
+ 
+ 	tokenFile := oauth.TokenFromResponse(response, authMethod, a.now())
+@@ -158,47 +212,14 @@ func (a *App) loginOAuth(alias, authMethod, projectID, region string, noBrowser
+ 		}
+ 	}
+ 	if tokenFile.Token.RefreshToken == "" {
+-		return a.failCode("oauth_error", "Re-run login and approve offline access.", "Google did not return a refresh token")
++		return nil, nil, a.failCode("oauth_error", "Re-run login and approve offline access.", "Google did not return a refresh token")
+ 	}
+ 
+ 	raw, err := oauth.MarshalTokenFile(tokenFile)
+ 	if err != nil {
+-		return a.failCode("oauth_error", "Try signing in again.", "could not prepare the credential document")
+-	}
+-	a.saveLiveAccount()
+-	prevKeeper := a.currentDesktopKeeperHint()
+-	claimLive := a.retainLiveInstallationID()
+-	result, err := a.Store.Upsert(raw, alias, true)
+-	if err != nil {
+-		return a.registryFailure(err, "could not save the logged-in account")
+-	}
+-	report := a.Storage.Write(raw)
+-	if !report.OK() {
+-		if errors.Is(report.Error(), agy.ErrBackup) {
+-			return a.failCode("backup_error", fmt.Sprintf("The account is saved; fix backup permissions and run `agy-auth switch %s`.", result.Account.ID), "could not back up the current agy credential")
+-		}
+-		return a.errorDoc(1, ErrorDoc{
+-			Code:    "state_uncertain",
+-			Message: "the account was saved, but the agy credential could not be written",
+-			Hint:    fmt.Sprintf("Run `agy-auth switch %s` after fixing credential storage.", result.Account.ID),
+-		})
+-	}
+-	if err := a.Storage.SyncSettings(authMethod, projectID, region); err != nil {
+-		warnings = append(warnings, fmt.Sprintf("settings: %v", err))
++		return nil, nil, a.failCode("oauth_error", "Try signing in again.", "could not prepare the credential document")
+ 	}
+-	if err := report.Error(); err != nil {
+-		warnings = append(warnings, err.Error())
+-	}
+-	if result.Account.Email == "" {
+-		warnings = append(warnings, "the ID token did not include an email address")
+-	}
+-	if err := a.ensureLiveInstallationID(result.Account.ID, claimLive); err != nil {
+-		warnings = append(warnings, fmt.Sprintf("could not set the installation id: %v", err))
+-	}
+-	isGCP := strings.EqualFold(strings.TrimSpace(authMethod), agy.AuthMethodGCP) || strings.TrimSpace(projectID) != ""
+-	deskRes, _ := a.syncDesktopForAccount(&result.Account, raw, isGCP, deskOpts, prevKeeper)
+-	warnings = append(warnings, deskRes.Warnings...)
+-	return a.finishLoginWithDesktop(result, report, deskRes, warnings)
++	return raw, warnings, 0
+ }
+ 
+ func (a *App) loginViaAgy(alias, agyPath string, isGCP bool, projectID, region string, deskOpts switchOptions) int {
+diff --git a/internal/cli/monitor.go b/internal/cli/monitor.go
+new file mode 100644
+index 0000000..acc7a11
+--- /dev/null
++++ b/internal/cli/monitor.go
+@@ -0,0 +1,173 @@
++package cli
++
++import (
++	"fmt"
++	"os"
++	"strings"
++	"time"
++
++	"github.com/fikrilal/agy-auth/internal/agy"
++	"github.com/fikrilal/agy-auth/internal/oauth"
++	"github.com/fikrilal/agy-auth/internal/registry"
++	"github.com/fikrilal/agy-auth/internal/usage"
++	"golang.org/x/term"
++)
++
++// NewMonitor initializes the separate quota store. The live client and the
++// desktop manager deliberately have no role in this command.
++func NewMonitor() (*App, error) {
++	store, err := registry.DefaultStore()
++	if err != nil {
++		return nil, err
++	}
++	return &App{
++		In: os.Stdin, Out: os.Stdout, Err: os.Stderr, Store: store,
++		TTY: term.IsTerminal(int(os.Stdin.Fd())), OutTTY: term.IsTerminal(int(os.Stdout.Fd())),
++		StdinFile: os.Stdin, StdoutFile: os.Stdout, StderrFile: os.Stderr,
++		Now: time.Now, UsageGroups: usage.NewClient(Version),
++	}, nil
++}
++
++const monitorHelp = `agy-auth-monitor: authorize accounts and read quotas for Balance HUD.
++
++Usage:
++  agy-auth-monitor login [--monitor-only] [--alias <name>] [--agy <path>] [--no-browser]
++  agy-auth-monitor login --gcp --project <id> [--region <global|us|eu>]
++  agy-auth-monitor [--json] usage --all
++  agy-auth-monitor [--json] list
++  agy-auth-monitor [--json] version
++
++Authorization only updates the monitor store (AGY_AUTH_HOME).
++`
++
++func (a *App) RunMonitor(args []string) int {
++	args = a.extractGlobals(args)
++	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" ||
++		(len(args) == 2 && (args[1] == "--help" || args[1] == "-h")) {
++		fmt.Fprint(a.Out, monitorHelp)
++		return 0
++	}
++	a.Command = args[0]
++	switch a.Command {
++	case "login":
++		return a.monitorLogin(args[1:])
++	case "usage":
++		if len(args) == 2 && args[1] == "--all" {
++			return a.cmdUsageAll()
++		}
++	case "list", "ls":
++		// The monitor inventory is always local and read-only.
++		for _, arg := range args[1:] {
++			if arg != "--no-sync" && arg != "--no-usage" {
++				return a.failCode("usage", "Run agy-auth-monitor --help.", "unsupported list option %q", arg)
++			}
++		}
++		return a.monitorList()
++	case "version", "--version", "-v":
++		if len(args) == 1 {
++			if a.JSON {
++				_ = a.emitJSON(map[string]string{"version": Version})
++			} else {
++				fmt.Fprintf(a.Out, "agy-auth-monitor %s\n", Version)
++			}
++			return 0
++		}
++	}
++	return a.failCode("usage", "Run agy-auth-monitor --help.", "unsupported command or arguments")
++}
++
++func (a *App) monitorList() int {
++	reg, err := a.Store.Load()
++	if err != nil {
++		return a.monitorStoreFailure(err, "could not read the account registry")
++	}
++	rows := a.pickerRows(reg.Accounts, reg.Active, accountNumbers(reg))
++	if a.JSON {
++		if err := a.emitJSON(map[string]any{"accounts": rows, "current": nil}); err != nil {
++			return a.failCode("output_error", "", "could not write JSON output")
++		}
++		return 0
++	}
++	for _, row := range rows {
++		fmt.Fprintf(a.Out, "%d. %s\n", row.Number, row.displayName())
++	}
++	return 0
++}
++
++func (a *App) monitorStoreFailure(err error, message string) int {
++	return a.failCode("registry_error", "Check the AGY_AUTH_HOME directory and backup permissions.", "%s: %v", message, err)
++}
++
++func (a *App) monitorLogin(args []string) int {
++	fs := a.newFlagSet("login")
++	alias := fs.String("alias", "", "monitor account label")
++	method := fs.String("auth-method", agy.AuthMethodConsumer, "authorization method")
++	gcp := fs.Bool("gcp", false, "Google Cloud project")
++	project := fs.String("project", "", "Google Cloud project ID")
++	region := fs.String("region", "", "Google Cloud region")
++	noBrowser := fs.Bool("no-browser", false, "print the authorization URL")
++	agyPath := fs.String("agy", "", "Antigravity CLI path")
++	fs.Bool("monitor-only", true, "compatibility flag: all authorizations are monitor-only")
++	fail := func(message string) int {
++		return a.failCode("usage", "Run agy-auth-monitor --help.", "%s", message)
++	}
++	if err := fs.Parse(args); err != nil {
++		return fail(err.Error())
++	}
++	if fs.NArg() != 0 {
++		return fail("login takes no positional arguments")
++	}
++	if *alias != "" {
++		if err := registry.ValidateAlias(*alias); err != nil {
++			return fail(err.Error())
++		}
++	}
++	effective := strings.TrimSpace(*method)
++	if effective == "" {
++		effective = agy.AuthMethodConsumer
++	}
++	var projectID, regionValue string
++	if *gcp || strings.TrimSpace(*project) != "" || strings.EqualFold(effective, agy.AuthMethodGCP) {
++		effective = agy.AuthMethodGCP
++		rawProject, rawRegion := strings.TrimSpace(*project), strings.TrimSpace(*region)
++		var err error
++		if rawProject == "" && a.TTY && !a.JSON {
++			rawProject, err = a.readLine("Google Cloud project ID: ")
++			if err != nil {
++				return fail("could not read the Google Cloud project ID")
++			}
++			if rawRegion == "" && strings.TrimSpace(rawProject) != "" {
++				rawRegion, err = a.readLine("Google Cloud region [global/us/eu] (default: global): ")
++				if err != nil {
++					return fail("could not read the Google Cloud region")
++				}
++			}
++		}
++		projectID, err = agy.ValidateProjectID(rawProject)
++		if err != nil {
++			return fail(err.Error())
++		}
++		regionValue, err = agy.ValidateRegion(rawRegion)
++		if err != nil {
++			return fail(err.Error())
++		}
++	} else if strings.TrimSpace(*region) != "" {
++		return fail("--region requires --gcp or --project")
++	}
++	if err := oauth.EnsureClientForMethod(*agyPath, effective); err != nil {
++		return a.failCode("oauth_error", "Pass --agy <path> or set AGY_AUTH_AGY_PATH.", "could not discover the Antigravity OAuth client")
++	}
++	raw, warnings, code := a.requestOAuth(effective, projectID, regionValue, *noBrowser)
++	if code != 0 {
++		return code
++	}
++	result, err := a.Store.Upsert(raw, *alias, false)
++	if err != nil {
++		return a.monitorStoreFailure(err, "could not save the monitoring account")
++	}
++	for _, warning := range warnings {
++		a.warn("%s", warning)
++	}
++	fmt.Fprintf(a.Out, "Monitoring account saved: %s\n", result.Account.DisplayName())
++	return 0
++}
+diff --git a/internal/cli/monitor_test.go b/internal/cli/monitor_test.go
+new file mode 100644
+index 0000000..c6f67c3
+--- /dev/null
++++ b/internal/cli/monitor_test.go
+@@ -0,0 +1,96 @@
++package cli
++
++import (
++	"bytes"
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"testing"
++
++	"github.com/fikrilal/agy-auth/internal/oauth"
++	"github.com/fikrilal/agy-auth/internal/usage"
++)
++
++func TestMonitorAuthorizesAndReadsTwoAccountsWithoutSwitching(t *testing.T) {
++	setTestOAuthClient(t)
++	env := newTestEnv(t, true)
++	live, err := os.ReadFile(env.tokenPath)
++	if err != nil {
++		t.Fatal(err)
++	}
++	idTokens := map[string]string{
++		"first-code":  makeCLIIDToken(t, "one@example.test", "monitor-one"),
++		"second-code": makeCLIIDToken(t, "two@example.test", "monitor-two"),
++	}
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		code := r.FormValue("code")
++		if idTokens[code] == "" {
++			http.Error(w, "unknown mock code", 400)
++			return
++		}
++		w.Header().Set("Content-Type", "application/json")
++		_ = json.NewEncoder(w).Encode(map[string]any{
++			"access_token": "test-access-" + code, "expires_in": 3600, "refresh_token": "test-refresh-" + code,
++			"token_type": "Bearer", "id_token": idTokens[code],
++		})
++	}))
++	defer server.Close()
++	oldEndpoint, oldClient := oauth.TokenEndpoint, oauth.HTTPClient
++	oauth.TokenEndpoint, oauth.HTTPClient = server.URL, server.Client()
++	t.Cleanup(func() { oauth.TokenEndpoint, oauth.HTTPClient = oldEndpoint, oldClient })
++
++	var originalRegistrySelection string
++	for i, entry := range []struct{ alias, code string }{{"first", "first-code"}, {"second", "second-code"}} {
++		app, _, errOut := env.app(entry.code + "\n")
++		// The shipped monitor never initializes a live storage or desktop handle.
++		app.Storage, app.Desktop = nil, nil
++		if code := app.RunMonitor([]string{"login", "--monitor-only", "--no-browser", "--alias", entry.alias}); code != 0 {
++			t.Fatalf("monitor login exit = %d: %s", code, errOut)
++		}
++		reg, err := app.Store.Load()
++		if err != nil {
++			t.Fatal(err)
++		}
++		if i == 0 {
++			originalRegistrySelection = reg.Active
++		} else if reg.Active != originalRegistrySelection {
++			t.Fatal("second authorization changed the monitor registry selection")
++		}
++	}
++
++	app, out, errOut := env.app("")
++	app.Storage, app.Desktop = nil, nil
++	provider := &testGroupsProvider{groups: usageGroups()}
++	app.UsageGroups = provider
++	if code := app.RunMonitor([]string{"--json", "usage", "--all"}); code != 0 {
++		t.Fatalf("monitor usage exit = %d: %s", code, errOut)
++	}
++	envelope := decodeTestEnvelope(t, out)
++	var payload struct {
++		Accounts []struct {
++			Email  string        `json:"email"`
++			Groups []usage.Group `json:"groups"`
++		} `json:"accounts"`
++	}
++	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
++		t.Fatal(err)
++	}
++	if len(payload.Accounts) != 2 || provider.callCount() != 2 || len(payload.Accounts[0].Groups) == 0 ||
++		len(payload.Accounts[1].Groups) == 0 || payload.Accounts[0].Email == payload.Accounts[1].Email {
++		t.Fatal("the monitor did not return two independent quota rows")
++	}
++	if after, err := os.ReadFile(env.tokenPath); err != nil || !bytes.Equal(live, after) {
++		t.Fatal("monitor authorization changed the live client credential")
++	}
++}
++
++func TestMonitorRejectsClientManagementCommands(t *testing.T) {
++	env := newTestEnv(t, false)
++	for _, args := range [][]string{{"switch", "first"}, {"login", "--relaunch"}, {"remove", "first"}} {
++		app, _, _ := env.app("")
++		if status := app.RunMonitor(args); status == 0 {
++			t.Fatalf("monitor accepted %v", args)
++		}
++	}
++}
 diff --git a/internal/cli/spec.go b/internal/cli/spec.go
 index de5e34f..fb101d1 100644
 --- a/internal/cli/spec.go

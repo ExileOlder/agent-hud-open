@@ -15,6 +15,9 @@ out="${BALANCE_HUD_MONITOR_OUT:-$root/build/$os-$arch}"
 mkdir -p "$out"
 name=agy-auth-monitor
 if [ "$os" = windows ]; then name="$name.exe"; fi
-CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -mod=readonly -trimpath -ldflags="-s -w" -o "$out/$name" ./cmd/agy-auth
+if [ "$os" = "$(go env GOHOSTOS)" ] && [ "$arch" = "$(go env GOHOSTARCH)" ]; then
+  CGO_ENABLED=0 go test -mod=readonly ./internal/cli -run '^TestMonitor' >&2
+fi
+CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -mod=readonly -trimpath -ldflags="-s -w" -o "$out/$name" ./cmd/agy-auth-monitor
 cp LICENSE "$out/LICENSE.agy-auth"
 printf '%s\n' "$out/$name"
