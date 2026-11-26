@@ -688,6 +688,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 				return 0
 			case 0x113: // WM_TIMER
 				now := time.Now()
+				painter.avatars.trim(now)
 				frames, active := work.frames(rows, now, started, hoverStart, hover, p)
 				frames, active = mail.cueFrames(now, p, rows, frames, active)
 				if previousFrames != frames {

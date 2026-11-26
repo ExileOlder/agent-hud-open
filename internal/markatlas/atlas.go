@@ -59,3 +59,21 @@ func (a Atlas) Draw(dst *image.RGBA, origin image.Point, i int) {
 	origin = origin.Add(offset)
 	draw.Draw(dst, image.Rectangle{Min: origin, Max: origin.Add(src.Size())}, a.pixels, src.Min, draw.Over)
 }
+
+// Tile owns just one frame, independent of the atlas it came from.
+type Tile struct {
+	pixels *image.NRGBA
+	offset image.Point
+}
+
+func (a Atlas) CopyTile(i int) Tile {
+	src, offset := a.frame(i)
+	im := image.NewNRGBA(image.Rectangle{Max: src.Size()})
+	draw.Draw(im, im.Bounds(), a.pixels, src.Min, draw.Src)
+	return Tile{im, offset}
+}
+
+func (t Tile) Draw(dst *image.RGBA, origin image.Point) {
+	origin = origin.Add(t.offset)
+	draw.Draw(dst, t.pixels.Bounds().Add(origin), t.pixels, image.Point{}, draw.Over)
+}

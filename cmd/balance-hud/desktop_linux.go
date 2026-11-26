@@ -271,6 +271,7 @@ func runDesktop(fetch func() []result, clients ...settingsTools) error {
 			renderMail(now)
 		}
 		now, hover := time.Now(), int(C.hud_hover(h))
+		painter.avatars.trim(now)
 		if hover != lastHover {
 			hoverStart, lastHover = now, hover
 		}

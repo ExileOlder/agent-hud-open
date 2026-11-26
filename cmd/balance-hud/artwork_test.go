@@ -2,31 +2,31 @@ package main
 
 import (
 	"bytes"
+	"image"
 	"testing"
-
-	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
+	"time"
 )
 
 func TestAnimationAtlasesMatchNativeGrid(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
-		load          func() markatlas.Atlas
+		sheet         avatarSheet
 		slots, frames int
 	}{
-		{"hover", hoverAtlas, 3, hoverFrames},
-		{"idle", idleAtlas, 3, idleFrames},
-		{"work", workAtlas, 3, workFrames},
-		{"Claude hover", claudeHoverAtlas, 1, hoverFrames},
-		{"Claude idle", claudeIdleAtlas, 1, idleFrames},
-		{"Claude work", claudeWorkAtlas, 1, workFrames},
-		{"tools", toolAtlas, 4, toolFrames},
-		{"question", cueAtlas[cueQuestion], 4, waitAtlasFrames},
-		{"permission", cueAtlas[cuePermission], 4, waitAtlasFrames},
-		{"completion", cueAtlas[cueDone], 4, cueFrames},
+		{"hover", sheetHover, 3, hoverFrames},
+		{"idle", sheetIdle, 3, idleFrames},
+		{"work", sheetWork, 3, workFrames},
+		{"Claude hover", sheetClaudeHover, 1, hoverFrames},
+		{"Claude idle", sheetClaudeIdle, 1, idleFrames},
+		{"Claude work", sheetClaudeWork, 1, workFrames},
+		{"tools", sheetTool, 4, toolFrames},
+		{"question", sheetQuestion, 4, waitAtlasFrames},
+		{"permission", sheetPermission, 4, waitAtlasFrames},
+		{"completion", sheetDone, 4, cueFrames},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			want := tc.slots * tc.frames
-			if got := tc.load().Len(); got != want {
+			if got := decodeAtlas(avatarData[tc.sheet]).Len(); got != want {
 				t.Fatalf("atlas frame count = %d, want %d", got, want)
 			}
 		})
@@ -65,4 +65,33 @@ func TestDockIncrementalPaintMatchesFreshPaint(t *testing.T) {
 	check("percentages hidden")
 	p.Edge, p.ShowClaude = 3, false
 	check("side dock restored")
+}
+
+func TestColdAtlasesCanExpireWithoutChangingLogosOrReloadedFrames(t *testing.T) {
+	var cache avatarCache
+	now := time.Now()
+	render := func(provider, frame int, at time.Time) []byte {
+		dst := image.NewRGBA(image.Rect(0, 0, markRadius*2, markRadius*2))
+		cache.draw(dst, image.Point{}, provider, frame, at)
+		return dst.Pix
+	}
+	logo := render(0, 0, now)
+	claudeLogo := render(4, 0, now)
+	if cache.sheets[sheetHover].atlas.Len() != 0 || cache.sheets[sheetClaudeHover].atlas.Len() != 0 {
+		t.Fatal("rest logos retained the hover atlases")
+	}
+	active := render(0, workBase+8, now)
+	// An idle visit refreshed its own sheet shortly before the sweep.
+	recent := now.Add(avatarIdleRetention - time.Second)
+	render(1, -8, recent)
+	after := now.Add(avatarIdleRetention)
+	cache.trim(after)
+	if cache.sheets[sheetWork].atlas.Len() != 0 || cache.sheets[sheetIdle].atlas.Len() == 0 {
+		t.Fatal("sweep did not separate expired and recently used atlases")
+	}
+	if !bytes.Equal(logo, render(0, 0, after)) ||
+		!bytes.Equal(claudeLogo, render(4, 0, after)) ||
+		!bytes.Equal(active, render(0, workBase+8, after)) {
+		t.Fatal("expiry or reloading changed frame pixels")
+	}
 }

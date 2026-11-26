@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"image/draw"
 	"math"
-	"sync"
+	"time"
 
 	"github.com/ExileOlder/agent-hud-open/internal/markatlas"
 )
@@ -48,24 +48,6 @@ const (
 	hoverFrames    = 96
 	markRadius     = markatlas.Cell / 2
 )
-
-var hoverAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(hoverData) })
-var idleAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(idleData) })
-var claudeHoverAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(claudeHoverData) })
-var claudeIdleAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(claudeIdleData) })
-
-var workAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(workData) })
-var claudeWorkAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(claudeWorkData) })
-
-// The upstream procedural performer shares this pose across tool kinds.
-// Keep a single atlas, not one duplicate sheet per status.
-var toolAtlas = sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(toolData) })
-
-var cueAtlas = [...]func() markatlas.Atlas{
-	sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(cueQuestionData) }),
-	sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(cuePermissionData) }),
-	sync.OnceValue(func() markatlas.Atlas { return decodeAtlas(cueDoneData) }),
-}
 
 func decodeAtlas(data []byte) markatlas.Atlas {
 	img, err := markatlas.Open(data)
@@ -119,6 +101,7 @@ type barPainter struct {
 	geometry [3]int
 	vertical bool
 	marks    [5]paintedMark
+	avatars  avatarCache
 }
 
 var dockRGBA = image.NewUniform(color.RGBA{5, 7, 9, 255})
@@ -139,6 +122,7 @@ func (b *barPainter) paint(rows []row, p placement, frames markFrames) *image.RG
 		draw.Draw(b.bitmap, b.bitmap.Bounds(), dockBGRA, image.Point{}, draw.Src)
 	}
 	dst := b.bitmap
+	now := time.Now()
 	for i, r := range rows[:p.slotCount()] {
 		mark := paintedMark{r.Percent, r.quotaTone(), frames[i]}
 		if !full && mark == b.marks[i] {
@@ -176,48 +160,7 @@ func (b *barPainter) paint(rows []row, p placement, frames markFrames) *image.RG
 				dst.SetRGBA(xx, yy, px)
 			}
 		}
-		slot := [...]int{0, 1, 1, 2, 0}[i]
-		frame, count := frames[i], hoverFrames
-		var atlas markatlas.Atlas
-		if frame >= pendingBase {
-			look := (frame - pendingBase) / waitAtlasFrames
-			frame, count, atlas = (frame-pendingBase)%waitAtlasFrames, waitAtlasFrames, cueAtlas[look]()
-			if i == 4 {
-				slot = 3
-			}
-		} else if frame >= cueBase {
-			look := (frame - cueBase) / cueFrames
-			frame, count, atlas = (frame-cueBase)%cueFrames, cueFrames, cueAtlas[look]()
-			if look != int(cueDone) {
-				count = waitAtlasFrames
-			}
-			if i == 4 {
-				slot = 3
-			}
-		} else if frame >= toolBase {
-			frame, count, atlas = (frame-toolBase)%toolFrames, toolFrames, toolAtlas()
-			if i == 4 {
-				slot = 3
-			}
-		} else if frame >= workBase {
-			frame, count = frame-workBase, workFrames
-			if i == 4 {
-				atlas = claudeWorkAtlas()
-			} else {
-				atlas = workAtlas()
-			}
-		} else if i == 4 {
-			atlas = claudeHoverAtlas()
-			if frame < 0 {
-				frame, count, atlas = -frame-1, idleFrames, claudeIdleAtlas()
-			}
-		} else if frame < 0 {
-			frame, count, atlas = -frame-1, idleFrames, idleAtlas()
-		}
-		if atlas.Len() == 0 {
-			atlas = hoverAtlas()
-		}
-		atlas.Draw(dst, image.Pt(cx-markRadius, cy-markRadius), slot*count+frame)
+		b.avatars.draw(dst, image.Pt(cx-markRadius, cy-markRadius), i, frames[i], now)
 		for y := patch.Min.Y; y < patch.Max.Y; y++ {
 			start := dst.PixOffset(patch.Min.X, y)
 			pixels := dst.Pix[start : start+4*patch.Dx()]
