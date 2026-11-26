@@ -3,6 +3,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 assets="$root/cmd/balance-hud/artwork"
+cd "$root"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 upstream="$1"
@@ -35,7 +36,7 @@ for mode in "$@"; do
   esac
   "${BROWSER:-chromium}" --headless=new --disable-gpu --no-first-run --user-data-dir="$tmp/profile" \
     --virtual-time-budget=30000 --dump-dom "file://$tmp/hover.html$query" > "$tmp/dom.html"
-  python3 - "$tmp/dom.html" "$assets/$mode.png" <<'PY'
+  python3 - "$tmp/dom.html" "$tmp/recorded.png" <<'PY'
 import base64, pathlib, re, sys
 page = pathlib.Path(sys.argv[1]).read_text()
 match = re.search(r'<body>data:image/png;base64,([A-Za-z0-9+/=]+)</body>', page)
@@ -43,4 +44,6 @@ if not match:
     sys.exit(page[:1000])
 pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(match[1], validate=True))
 PY
+  go run ./scripts/compact-atlas.go "$tmp/recorded.png" "$tmp/compact.png"
+  mv -f "$tmp/compact.png" "$assets/$mode.png"
 done

@@ -9,8 +9,6 @@ import (
 	"image/png"
 	"math"
 	"sync"
-
-	imagedraw "golang.org/x/image/draw"
 )
 
 //go:embed artwork/hover.png
@@ -48,20 +46,12 @@ const (
 	barItem        = 92
 	barItemNumbers = 148
 	hoverFrames    = 40
-	hoverCell      = 80
+	atlasCell      = 2 * markRadius
 	hoverColumns   = 8
 	markRadius     = 29
 )
 
-var hoverAtlas image.Image
-
-// Every provider mark uses the same cell and target size. Reuse the
-// high-quality filter weights and its scratch buffer between animation frames.
-const toolCell = 64
-
-var toolScaler = imagedraw.CatmullRom.NewScaler(2*markRadius, 2*markRadius, toolCell, toolCell)
-var markScaler = imagedraw.CatmullRom.NewScaler(2*markRadius, 2*markRadius, hoverCell, hoverCell)
-
+var hoverAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(hoverPNG) })
 var idleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(idlePNG) })
 var claudeHoverAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeHoverPNG) })
 var claudeIdleAtlas = sync.OnceValue(func() image.Image { return decodeAtlas(claudeIdlePNG) })
@@ -85,10 +75,6 @@ func decodeAtlas(data []byte) image.Image {
 		panic(err)
 	}
 	return img
-}
-
-func init() {
-	hoverAtlas = decodeAtlas(hoverPNG)
 }
 
 // Shared with the Xft percentage palette. The missing ring is dimmer than
@@ -166,15 +152,14 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 			}
 		}
 		slot := [...]int{0, 1, 1, 2, 0}[i]
-		frame, count, atlas := frames[i], hoverFrames, hoverAtlas
-		cell, scaler := hoverCell, markScaler
+		frame, count := frames[i], hoverFrames
+		var atlas image.Image
 		if frame >= pendingBase {
 			look := (frame - pendingBase) / waitAtlasFrames
 			frame, count, atlas = (frame-pendingBase)%waitAtlasFrames, waitAtlasFrames, cueAtlas[look]()
 			if i == 4 {
 				slot = 3
 			}
-			cell, scaler = toolCell, toolScaler
 		} else if frame >= cueBase {
 			look := (frame - cueBase) / cueFrames
 			frame, count, atlas = (frame-cueBase)%cueFrames, cueFrames, cueAtlas[look]()
@@ -184,13 +169,11 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 			if i == 4 {
 				slot = 3
 			}
-			cell, scaler = toolCell, toolScaler
 		} else if frame >= toolBase {
 			frame, count, atlas = (frame-toolBase)%toolFrames, toolFrames, toolAtlas()
 			if i == 4 {
 				slot = 3
 			}
-			cell, scaler = toolCell, toolScaler
 		} else if frame >= workBase {
 			frame, count = frame-workBase, workFrames
 			if i == 4 {
@@ -206,10 +189,13 @@ func paintBar(rows []row, p placement, frames markFrames, dst *image.RGBA) *imag
 		} else if frame < 0 {
 			frame, count, atlas = -frame-1, idleFrames, idleAtlas()
 		}
-		x := frame % hoverColumns * cell
-		y := (slot*count/hoverColumns + frame/hoverColumns) * cell
-		scaler.Scale(dst, image.Rect(cx-markRadius, cy-markRadius, cx+markRadius, cy+markRadius),
-			atlas, image.Rect(x, y, x+cell, y+cell), draw.Over, nil)
+		if atlas == nil {
+			atlas = hoverAtlas()
+		}
+		x := frame % hoverColumns * atlasCell
+		y := (slot*count/hoverColumns + frame/hoverColumns) * atlasCell
+		draw.Draw(dst, image.Rect(cx-markRadius, cy-markRadius, cx+markRadius, cy+markRadius),
+			atlas, image.Pt(x, y), draw.Over)
 	}
 	// The targets use little-endian 32-bit BGRX pixels.
 	for i := 0; i < len(dst.Pix); i += 4 {
