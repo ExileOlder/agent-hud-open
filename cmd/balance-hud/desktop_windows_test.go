@@ -250,6 +250,83 @@ func TestWindowsNativeSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait("separate-process completion did not land", func() bool { return visible(badge) })
+	var desktop rect
+	if u("SystemParametersInfoW", 48, 0, uintptr(unsafe.Pointer(&desktop)), 0) == 0 {
+		t.Fatal("cannot read the native runner's work area")
+	}
+	bounds := func(hwnd uintptr) rect {
+		var r rect
+		if u("GetWindowRect", hwnd, uintptr(unsafe.Pointer(&r))) == 0 {
+			t.Fatal("cannot read the native dock rectangle")
+		}
+		return r
+	}
+	changeCursor := func(q point) {
+		if u("SetCursorPos", uintptr(q.X), uintptr(q.Y)) == 0 {
+			t.Fatal("cannot move the native cursor for drag")
+		}
+	}
+	origin := bounds(bar)
+	grab := point{origin.Left + 46, origin.Top + 50}
+	changeCursor(grab)
+	down, up := uintptr(0x0002), uintptr(0x0004) // physical primary down/up
+	if u("GetSystemMetrics", 23) != 0 {
+		down, up = 0x0008, 0x0010
+	}
+	u("mouse_event", down, 0, 0, 0, 0)
+	pressed := true
+	defer func() {
+		if pressed {
+			u("mouse_event", up, 0, 0, 0, 0)
+		}
+	}()
+	var gui struct {
+		size, flags                                   uint32
+		active, focus, capture, menu, moveSize, caret uintptr
+		cursor                                        rect
+	}
+	gui.size = uint32(unsafe.Sizeof(gui))
+	thread := u("GetWindowThreadProcessId", bar, 0)
+	wait("native primary button did not capture the cursor", func() bool {
+		return u("GetGUIThreadInfo", thread, uintptr(unsafe.Pointer(&gui))) != 0 && gui.capture == bar
+	})
+	width, height := desktop.Right-desktop.Left, desktop.Bottom-desktop.Top
+	centerY := desktop.Top + height/3
+	assertFollows := func(q point) {
+		changeCursor(q)
+		wait("dock stopped following the real cursor or left the badge in the old position", func() bool {
+			got := bounds(bar)
+			return got.Left == origin.Left+q.X-grab.X && got.Top == origin.Top+q.Y-grab.Y && !visible(badge)
+		})
+	}
+	assertFollows(point{desktop.Left + width/3, centerY})
+	assertFollows(point{desktop.Left + 2*width/3, centerY + 17})
+	// The straight middle of the left outline should alternate light dashes
+	// and dark gaps; a solid border or a blank repaint would fail here.
+	wait("drag outline was not painted as dashes", func() bool {
+		dc := u("GetDC", bar)
+		if dc == 0 {
+			return false
+		}
+		defer u("ReleaseDC", bar, dc)
+		dash, gap := false, false
+		for y := uintptr(106); y < 154; y++ {
+			color := uint32(g("GetPixel", dc, 2, y))
+			dash = dash || color == 0x00f6f4f2
+			gap = gap || color == 0x00090705
+		}
+		return dash && gap
+	})
+	changeCursor(point{desktop.Right - 8, centerY + 17})
+	u("mouse_event", up, 0, 0, 0, 0)
+	pressed = false
+	wait("drop did not snap to the right or restore its inbox badge", func() bool {
+		return bounds(bar).Right == desktop.Right-3 && visible(badge)
+	})
+	data, err = os.ReadFile(settingsPath())
+	if err != nil || json.Unmarshal(data, &prefsOn) != nil || prefsOn.Edge != 1 {
+		t.Fatalf("drag did not persist the right edge: %s %v", data, err)
+	}
 	post(bar, 0x10, 0, 0, 0)
 	if err := app.Wait(); err != nil {
 		t.Fatal(err)

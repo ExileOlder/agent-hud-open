@@ -540,12 +540,17 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 			details(i)
 		}
 	}
+	renderMail := func(now time.Time) { mail.draw(now, frame, area, p, rows, pressing && moved, shape, invalidate) }
 	drag := func(cur point) {
+		first := !moved
 		moved, outlined = true, true
 		x := dragOrigin.Left + cur.X - initial.X
 		y := dragOrigin.Top + cur.Y - initial.Y
 		u("SetWindowPos", bar, 0, uintptr(x), uintptr(y), 0, 0, 0x1|0x4|0x10)
-		invalidate(bar)
+		if first {
+			renderMail(time.Now())
+			invalidate(bar)
+		}
 	}
 	drop := func(cur point) {
 		x, y := bound(cur.X, area.Left, area.Right-1), bound(cur.Y, area.Top, area.Bottom-1)
@@ -574,13 +579,15 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		pressing, outlined = false, false
 		u("ReleaseCapture")
 		var cur point
-		if moved && u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 {
-			drop(cur)
+		if moved {
+			if u("GetCursorPos", uintptr(unsafe.Pointer(&cur))) != 0 {
+				drop(cur)
+			}
+			renderMail(time.Now())
 		}
 		invalidate(bar)
 	}
 
-	renderMail := func(now time.Time) { mail.draw(now, frame, area, p, rows, pressing && moved, shape, invalidate) }
 	handleIconClick := func(m point) bool {
 		_, _, step := dimensions()
 		v := m.X
