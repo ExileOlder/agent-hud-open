@@ -111,3 +111,43 @@ func TestInboxSnapshotKeepsOnlyNewestThirtyTwoNotices(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxScrollbarReachesOldestAndKeepsReadingPosition(t *testing.T) {
+	var inbox mailInbox
+	for i := range mailLimit {
+		inbox.land(mailItem{agent: 1, key: strconv.Itoa(i)})
+	}
+	fullHeight := mailHeader + mailVisible*mailRow + 12
+	top, size := inbox.thumb(fullHeight)
+	if top != mailHeader || size < 24 {
+		t.Fatalf("thumb = %d, %d", top, size)
+	}
+	inbox.beginScroll(fullHeight-mailScrollBottom-1, fullHeight)
+	if inbox.offset != mailVisible {
+		t.Fatalf("track click should advance a page, offset=%d", inbox.offset)
+	}
+	top, size = inbox.thumb(fullHeight)
+	inbox.beginScroll(top+size/2, fullHeight)
+	inbox.dragScroll(fullHeight, fullHeight)
+	if got := inbox.visible(); len(got) != mailVisible || got[5].key != "0" {
+		t.Fatalf("oldest notice is unreachable: %+v", got)
+	}
+	inbox.dragScroll(0, fullHeight)
+	if inbox.offset != 0 {
+		t.Fatal("dragging up did not return to the latest notices")
+	}
+	inbox.scrollGrab = 0
+	inbox.scrollTo(4)
+	first := inbox.visible()[0].key
+	inbox.land(mailItem{agent: 1, key: "new"})
+	if inbox.visible()[0].key != first {
+		t.Fatal("a new arrival moved the notice being read")
+	}
+	inbox.fitRows(410)
+	if inbox.pageRows() != 3 {
+		t.Fatalf("short display shows %d rows", inbox.pageRows())
+	}
+	if _, size := inbox.thumb(mailHeader + 3*mailRow + 12); size == 0 {
+		t.Fatal("short display lost the scrollbar")
+	}
+}

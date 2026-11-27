@@ -61,6 +61,7 @@ type mailInbox struct {
 	revision     int
 	offset       int
 	pageSize     int
+	scrollGrab   int // 1 + pointer distance from thumb top; zero when released
 	cues         [5]markCue
 	profiles     map[string]uint32
 	agyCues      map[uint32]markCue
@@ -199,11 +200,14 @@ func (m *mailInbox) sourceSlot(item mailItem, rows []row) int {
 
 func (m *mailInbox) land(item mailItem) {
 	m.revision++
-	m.offset = 0
+	if m.offset > 0 {
+		m.offset++ // Keep the same message near the top during a new arrival.
+	}
 	m.items = append([]mailItem{item}, m.items...)
 	if len(m.items) > mailLimit {
 		m.items = m.items[:mailLimit]
 	}
+	m.offset = min(m.offset, max(0, len(m.items)-m.pageRows()))
 }
 func (m *mailInbox) advance(now time.Time, motion bool) {
 	if !motion {
@@ -229,23 +233,21 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 		m.open = len(m.items) > 0
 	case action == 91:
 		m.open = false
+		m.scrollGrab = 0
 	case action == 92:
 		m.items, m.queue = nil, nil
 		m.started = time.Time{}
 		m.revision++
 		m.open = false
 		m.offset = 0
+		m.scrollGrab = 0
 		m.saveNotices()
 	case action == 93 || action == 94:
 		step := 1
 		if action == 93 {
 			step = -1
 		}
-		next := max(0, min(m.offset+step, len(m.items)-m.pageRows()))
-		if next != m.offset {
-			m.offset = next
-			m.revision++
-		}
+		m.scrollTo(m.offset + step)
 	case action >= mailDismissBase && action < mailDismissBase+len(m.visible()):
 		index := m.offset + action - mailDismissBase
 		copy(m.items[index:], m.items[index+1:])
@@ -261,6 +263,52 @@ func (m *mailInbox) action(action int) (mailItem, bool) {
 		return m.visible()[action-mailOpenBase], true
 	}
 	return mailItem{}, false
+}
+
+// Cards stay on row boundaries; the thumb travels proportionately to the
+// whole inbox, even when a shorter screen shows fewer rows.
+const mailScrollBottom = 24
+
+func (m *mailInbox) thumb(height int) (top, size int) {
+	track := height - mailHeader - mailScrollBottom
+	if track <= 0 || len(m.items) <= m.pageRows() {
+		return 0, 0
+	}
+	size = min(track, max(24, track*m.pageRows()/len(m.items)))
+	top = mailHeader + (track-size)*m.offset/(len(m.items)-m.pageRows())
+	return
+}
+
+func (m *mailInbox) scrollTo(offset int) {
+	offset = max(0, min(offset, len(m.items)-m.pageRows()))
+	if m.offset != offset {
+		m.offset = offset
+		m.revision++
+	}
+}
+
+func (m *mailInbox) beginScroll(y, height int) {
+	top, size := m.thumb(height)
+	if size == 0 {
+		return
+	}
+	if y >= top && y < top+size {
+		m.scrollGrab = 1 + y - top
+	} else if y < top {
+		m.scrollTo(m.offset - m.pageRows())
+	} else {
+		m.scrollTo(m.offset + m.pageRows())
+	}
+}
+
+func (m *mailInbox) dragScroll(y, height int) {
+	_, size := m.thumb(height)
+	travel := height - mailHeader - mailScrollBottom - size
+	if m.scrollGrab == 0 || size == 0 || travel <= 0 {
+		return
+	}
+	pos := min(travel, max(0, y-(m.scrollGrab-1)-mailHeader))
+	m.scrollTo((pos*(len(m.items)-m.pageRows()) + travel/2) / travel)
 }
 
 func (m *mailInbox) pageRows() int {

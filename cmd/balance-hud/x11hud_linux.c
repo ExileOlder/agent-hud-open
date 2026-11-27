@@ -43,6 +43,7 @@ struct Hud {
     long long click_at, mail_click_at, mail_leave_at;
     int click_slot, mail_count, mail_open, mail_row_click, mail_dirty, paper_shown;
     int mail_rect[4], mail_panel_rect[4];
+    int mail_thumb_y, mail_thumb_h, mail_scroll_y, mail_scroll_down;
     int paper_xy[12], paper_x, paper_y, has_shape;
     PeekCell mail_rows[6];
     unsigned long mail_blue,mail_ring;
@@ -501,6 +502,10 @@ static void draw_mail_panel(Hud *h) {
     mail_text(h->mail_draw,&h->text_color,h->mail_small,width-110-text_width(h,h->mail_small,"全部清空")/2,45,"全部清空");
     XSetForeground(h->d,h->gc,h->mail_rule);
     XDrawLine(h->d,h->mail_panel,h->gc,22,66,width-23,66);
+    if(h->mail_thumb_h){
+        mail_rounded(h,width-12,mail_header,7,height-mail_header-24,3,h->mail_rule);
+        mail_rounded(h,width-12,h->mail_thumb_y,7,h->mail_thumb_h,3,h->mail_ring);
+    }
     for(int i=0;i<h->mail_displayed;i++){
         int y=mail_header+i*mail_row;
         PeekCell*row=&h->mail_rows[i];
@@ -543,7 +548,9 @@ void hud_mail_row(Hud *h,int i,const char *title,const char *body,int tone){
     snprintf(h->mail_rows[i].label,sizeof(h->mail_rows[i].label),"%s",title);
     snprintf(h->mail_rows[i].value,sizeof(h->mail_rows[i].value),"%s",body);
 }
-void hud_mail_sync(Hud *h,int count,int open,int x,int y,int px,int py,int pw,int ph,int displayed){
+void hud_mail_sync(Hud *h,int count,int open,int x,int y,int px,int py,int pw,int ph,int displayed,int thumb_y,int thumb_h){
+    if(thumb_y!=h->mail_thumb_y||thumb_h!=h->mail_thumb_h)h->mail_dirty=1;
+    h->mail_thumb_y=thumb_y;h->mail_thumb_h=thumb_h;
     h->mail_displayed=clamp(displayed,0,6);
     int previous=h->mail_count;
     h->mail_count=count;
@@ -568,8 +575,12 @@ void hud_mail_sync(Hud *h,int count,int open,int x,int y,int px,int py,int pw,in
         if(!was)XMapRaised(h->d,h->mail_panel);
         if(!was||previous!=count||h->mail_dirty)draw_mail_panel(h);
         h->mail_dirty=0;
-    }else if(was)XUnmapWindow(h->d,h->mail_panel);
+    }else if(was){
+        h->mail_scroll_down=0;
+        XUnmapWindow(h->d,h->mail_panel);
+    }
 }
+int hud_mail_scroll_y(Hud *h){return h->mail_scroll_y;}
 static void draw_paper(Hud *h) {
     if(!h->paper_shown)return;
     XPoint p[7];
@@ -663,7 +674,7 @@ Hud *hud_open(int edge, double offset, int numbers,int motion,int *already_runni
     XStoreName(d,h->mail_panel,"Balance HUD inbox");
     XStoreName(d,h->paper,"Balance HUD paper flight");
     XSelectInput(d,h->notice,ExposureMask|ButtonPressMask|EnterWindowMask|LeaveWindowMask);
-    XSelectInput(d,h->mail_panel,ExposureMask|ButtonPressMask|EnterWindowMask|LeaveWindowMask|PointerMotionMask);
+    XSelectInput(d,h->mail_panel,ExposureMask|ButtonPressMask|ButtonReleaseMask|EnterWindowMask|LeaveWindowMask|PointerMotionMask);
     XSelectInput(d,h->paper,ExposureMask);
     XStoreName(d,h->bar,"Balance HUD");
     XStoreName(d,h->tip,"Balance HUD quota details");
@@ -812,19 +823,35 @@ int hud_step(Hud *h,int timeout) {
                 if(badge&&!h->mail_open)return 90;
             }
             if(e.type==MotionNotify&&!badge){
+                if(h->mail_scroll_down){h->mail_scroll_y=e.xmotion.y;return 96;}
                 int hot=mail_target(h,e.xmotion.x,e.xmotion.y);
                 if(hot!=h->mail_hot){h->mail_hot=hot;draw_mail_panel(h);}
             }
-            if(e.type==LeaveNotify&&h->mail_open){
+            if(e.type==LeaveNotify&&h->mail_open&&!h->mail_scroll_down){
                 h->mail_leave_at=millis()+180;
                 if(h->mail_hot){h->mail_hot=0;draw_mail_panel(h);}
             }
+            if(e.type==ButtonRelease&&!badge&&e.xbutton.button==Button1&&h->mail_scroll_down){
+                h->mail_scroll_down=0;
+                if(e.xbutton.x<0||e.xbutton.x>=h->mail_panel_rect[2]||e.xbutton.y<0||e.xbutton.y>=h->mail_panel_rect[3])
+                    h->mail_leave_at=millis()+180;
+                return 97;
+            }
             if(e.type==ButtonPress){
-                if(!badge&&e.xbutton.button==Button4)return 93;
-                if(!badge&&e.xbutton.button==Button5)return 94;
+                if(!badge&&(e.xbutton.button==Button4||e.xbutton.button==Button5)){
+                    h->mail_click_at=0;
+                    return e.xbutton.button==Button4?93:94;
+                }
                 if(e.xbutton.button==Button3)return 91;
                 if(e.xbutton.button==Button1){
                     if(badge)return 90;
+                    if(h->mail_thumb_h&&e.xbutton.x>=h->mail_panel_rect[2]-16&&e.xbutton.y>=mail_header&&e.xbutton.y<h->mail_panel_rect[3]-24){
+                        h->mail_scroll_y=e.xbutton.y;
+                        h->mail_scroll_down=1;
+                        h->mail_leave_at=0;
+                        h->mail_click_at=0;
+                        return 95;
+                    }
                     int hit=mail_target(h,e.xbutton.x,e.xbutton.y);
                     if(hit==92||hit>=320){h->mail_click_at=0;return hit;}
                     if(hit>=300){

@@ -147,6 +147,7 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 	type mailLayout struct {
 		tail, panel                   mailRect
 		count, opened, rows, revision int
+		thumbY, thumbH                int
 	}
 	var placedMail mailLayout
 	paperShown := false
@@ -174,9 +175,10 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		if hidden {
 			count, opened = 0, 0
 		}
-		layout := mailLayout{tail, box, count, opened, len(mail.visible()), revision}
+		thumbY, thumbH := mail.thumb(box.h)
+		layout := mailLayout{tail, box, count, opened, len(mail.visible()), revision, thumbY, thumbH}
 		if layout != placedMail {
-			C.hud_mail_sync(h, C.int(count), C.int(opened), C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h), C.int(layout.rows))
+			C.hud_mail_sync(h, C.int(count), C.int(opened), C.int(tail.x), C.int(tail.y), C.int(box.x), C.int(box.y), C.int(box.w), C.int(box.h), C.int(layout.rows), C.int(thumbY), C.int(thumbH))
 			placedMail = layout
 		}
 		if len(mail.queue) > 0 && !hidden {
@@ -224,6 +226,12 @@ func runDesktop(fetch func() <-chan result, clients ...settingsTools) error {
 		case action >= 10 && action <= 11:
 			panel.page, panel.message = action-10, ""
 			drawSettings()
+		case action == 95:
+			mail.beginScroll(int(C.hud_mail_scroll_y(h)), placedMail.panel.h)
+		case action == 96:
+			mail.dragScroll(int(C.hud_mail_scroll_y(h)), placedMail.panel.h)
+		case action == 97:
+			mail.scrollGrab = 0
 		case (action >= 90 && action <= 94) || action >= 300:
 			if item, ok := mail.action(action); ok {
 				openNotice(item)

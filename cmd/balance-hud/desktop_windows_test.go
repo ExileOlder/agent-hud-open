@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -336,6 +337,55 @@ func TestWindowsNativeSmoke(t *testing.T) {
 	if err != nil || json.Unmarshal(data, &prefsOn) != nil || prefsOn.Edge != 1 {
 		t.Fatalf("drag did not persist the right edge: %s %v", data, err)
 	}
+	post(bar, 0x10, 0, 0, 0)
+	if err := app.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	inboxPath := filepath.Join(base, "BalanceHUD", "inbox.json")
+	snapshot := make([]savedNotice, mailLimit)
+	for i := range snapshot {
+		snapshot[i] = savedNotice{Agent: 1, Thread: fmt.Sprintf("cdefabcd-1234-5678-9abc-%012x", i)}
+	}
+	data, err = json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inboxPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	app = exec.CommandContext(ctx, exe, "-test.run=^TestWindowsNativeSmoke$")
+	app.Env = append(os.Environ(), "BALANCE_HUD_GUI_CHILD=1")
+	app.Stdout, app.Stderr = &output, &output
+	if err := app.Start(); err != nil {
+		t.Fatal(err)
+	}
+	wait("full inbox did not restore", func() bool {
+		bar, badge, inbox = find("Balance HUD"), find("Balance HUD messages"), find("Balance HUD inbox")
+		return visible(badge) && inbox != 0
+	})
+	post(badge, 0x202, 0, 40, 40)
+	wait("full inbox did not open", func() bool { return visible(inbox) })
+	rc := client(inbox)
+	rows := (rc.Bottom - mailHeader - 12) / mailRow
+	y := mailHeader + (rc.Bottom-mailHeader-mailScrollBottom)*rows/mailLimit/2
+	post(inbox, 0x201, 1, rc.Right-9, y)
+	post(inbox, 0x200, 1, rc.Right-9, rc.Bottom-mailScrollBottom-1)
+	post(inbox, 0x202, 0, rc.Right-9, rc.Bottom-mailScrollBottom-1)
+	post(inbox, 0x202, 0, rc.Right-58, mailHeader+(rows-1)*mailRow+49)
+	wait("scrollbar did not reach and dismiss the oldest message", func() bool {
+		data, err := os.ReadFile(inboxPath)
+		var got []savedNotice
+		if err != nil || json.Unmarshal(data, &got) != nil || len(got) != mailLimit-1 {
+			return false
+		}
+		for i, notice := range got {
+			if notice != snapshot[i] {
+				t.Fatalf("scrolling dismissed the wrong message at %d: %s", i, notice.Thread)
+			}
+		}
+		return true
+	})
 	post(bar, 0x10, 0, 0, 0)
 	if err := app.Wait(); err != nil {
 		t.Fatal(err)

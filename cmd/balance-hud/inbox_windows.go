@@ -91,6 +91,10 @@ func (m *winMail) renderWindow(hwnd, dc uintptr, write func(uintptr, int32, int3
 		fillMailCard(dc, width-198, 14, 176, 45, 11, clearBG)
 		write(dc, width-110-measure(dc, "全部清空")/2, 22, "全部清空", 0xf6f4f2)
 		drawMailStroke(dc, rule, 1, [4]int32{22, 66, width - 23, 66})
+		if y, size := m.thumb(int(height)); size > 0 {
+			fillMailCard(dc, width-12, mailHeader, 7, height-mailHeader-mailScrollBottom, 3, rule)
+			fillMailCard(dc, width-12, int32(y), 7, int32(size), 3, 0x74787b)
+		}
 		tiles := [3]uintptr{0x15362e, 0x1b314a, 0x3b2c24}
 		accents := [3]uintptr{0x72dcb1, 0x92baff, 0xf0be85}
 		for i, item := range m.visible() {
@@ -233,6 +237,10 @@ func (m *winMail) windowAction(hwnd uintptr, msg uint32, wp, lp uintptr) (int, b
 		}
 		if hwnd == m.panel {
 			q := mouse(lp)
+			if m.scrollGrab != 0 {
+				m.dragScroll(int(q.Y), m.lastPanel.h)
+				return 0, true
+			}
 			if next := mailTarget(int(q.X), int(q.Y), m.lastPanel.w, len(m.visible())); next != m.hot {
 				m.hot = next
 				u("InvalidateRect", m.panel, 0, 0)
@@ -240,6 +248,9 @@ func (m *winMail) windowAction(hwnd uintptr, msg uint32, wp, lp uintptr) (int, b
 		}
 		return 0, true
 	case 0x2a3: // WM_MOUSELEAVE
+		if m.scrollGrab != 0 {
+			return 0, true
+		}
 		m.leaveAt = time.Now().Add(180 * time.Millisecond)
 		if hwnd == m.panel && m.hot != 0 {
 			m.hot = 0
@@ -248,6 +259,7 @@ func (m *winMail) windowAction(hwnd uintptr, msg uint32, wp, lp uintptr) (int, b
 		return 0, true
 	case 0x20a: // WM_MOUSEWHEEL
 		if hwnd == m.panel {
+			m.clickAt = time.Time{}
 			if int16(wp>>16) > 0 {
 				return 93, true
 			}
@@ -256,7 +268,27 @@ func (m *winMail) windowAction(hwnd uintptr, msg uint32, wp, lp uintptr) (int, b
 		return 0, true
 	case 0x205:
 		return 91, true
+	case 0x201: // WM_LBUTTONDOWN
+		if hwnd == m.panel {
+			q := mouse(lp)
+			if _, size := m.thumb(m.lastPanel.h); size > 0 && int(q.X) >= m.lastPanel.w-16 &&
+				q.Y >= mailHeader && int(q.Y) < m.lastPanel.h-mailScrollBottom {
+				m.clickAt = time.Time{}
+				m.beginScroll(int(q.Y), m.lastPanel.h)
+				if m.scrollGrab != 0 {
+					u("SetCapture", m.panel)
+				}
+				return 0, true
+			}
+		}
+	case 0x215: // WM_CAPTURECHANGED
+		m.scrollGrab = 0
 	case 0x202:
+		if m.scrollGrab != 0 && hwnd == m.panel {
+			m.scrollGrab = 0
+			u("ReleaseCapture")
+			return 0, true
+		}
 		if hwnd == m.badge {
 			return 90, true
 		}

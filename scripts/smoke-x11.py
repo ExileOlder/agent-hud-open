@@ -51,8 +51,8 @@ class Pointer:
         assert self.xtst.XTestFakeMotionEvent(self.dpy, 0, x, y, 0)
         self.x11.XSync(self.dpy, 0)
 
-    def button(self, down):
-        assert self.xtst.XTestFakeButtonEvent(self.dpy, 1, down, 0)
+    def button(self, down, physical=1):
+        assert self.xtst.XTestFakeButtonEvent(self.dpy, physical, down, 0)
         self.x11.XSync(self.dpy, 0)
 
     def click(self, x, y):
@@ -192,6 +192,41 @@ def smoke(exe, home, display, log):
         panel = wait("completion panel did not open", lambda: window(" inbox"))
         open_then_dismiss(panel, finished)
 
+        # Seed the full persisted capacity in isolation, not the user's inbox.
+        stop()
+        threads = [f"cdefabcd-1234-5678-9abc-{n:012x}" for n in range(32)]
+        store.write_text(json.dumps([{"agent": 1, "tone": 0, "thread": t} for t in threads]))
+        app = start()
+        badge = wait("full inbox badge did not restore", lambda: window(" messages"))
+        pointer.move(badge.x + 42, badge.y + 42)
+        panel = wait("full inbox panel did not open", lambda: window(" inbox"))
+        assert panel.h == 72 + 6*108 + 12, panel
+        # Native wheel down/up and then grab and drag the right-hand thumb.
+        pointer.move(panel.x + 160, panel.y + 130)
+        for direction in (5, 4):
+            pointer.button(True, direction)
+            pointer.button(False, direction)
+        thumb_x = panel.x + panel.w - 9
+        thumb_y = panel.y + 110
+        pointer.move(thumb_x, thumb_y)
+        pointer.button(True)
+        try:
+            pointer.move(thumb_x, panel.y + panel.h - 25)
+        finally:
+            pointer.button(False)
+        route.unlink(missing_ok=True)
+        for _ in range(2):
+            pointer.click(panel.x + 130, panel.y + 121 + 5*108)
+            time.sleep(.05)
+        wait("the oldest notice was not accessible using the scrollbar", route.exists)
+        assert route.read_text().splitlines() == [f"codex://threads/{threads[-1]}"]
+        pointer.click(panel.x + panel.w - 58, panel.y + 121 + 5*108)
+        wait("dismissing the last row changed the wrong notice",
+             lambda: len(json.loads(store.read_text())) == 31)
+        assert [entry["thread"] for entry in json.loads(store.read_text())] == threads[:-1]
+        pointer.click(panel.x + panel.w - 100, panel.y + 35)
+        wait("fixture inbox did not clear", lambda: not window(" messages"))
+
         pointer.move(reopened.x + 46, reopened.y + 50)
         peek = wait("hover did not open the quota details", lambda: window(" quota details"))
         pointer.move(reopened.x + 46, reopened.y + 142)
@@ -204,7 +239,7 @@ def smoke(exe, home, display, log):
         peek = wait("the quota details did not follow the second mark", second_peek)
         pointer.click(peek.x + peek.w - 20, peek.y + peek.h // 2)
         wait("gear did not open the standalone settings window", lambda: window(" Settings"))
-        print("X11: duplicate guard, flight, drag, edge snap, inbox restore, exact route, dismissal and hover settings passed.")
+        print("X11: duplicate guard, flight, drag, edge snap, inbox restore, exact route, 32-item scroll, dismissal and hover settings passed.")
     finally:
         stop()
         pointer.close()

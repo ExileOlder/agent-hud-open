@@ -59,7 +59,7 @@ Licensed under Apache-2.0; the upstream license is kept in LICENSE.
 
 With the HUD open, new Codex turns that finish and pending Codex Desktop question
 cards send a paper plane to the message badge at the end of the dock. Hover or
-click the badge to open the message list. Use a row’s **×** to dismiss it, or
+click the badge to open the message list. Use the wheel or drag the right-hand scrollbar to see older notices. Click the track to move one page. Use a row’s **×** to dismiss it, or
 **全部清空** to clear the list. With animation enabled, the source
 mark shows a question, approval, or completion gesture when that event arrives.
 Pending questions and approvals observed through a live client state keep
